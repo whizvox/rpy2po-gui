@@ -6,6 +6,8 @@ import com.intellij.uiDesigner.core.Spacer;
 import com.soberlemur.potentilla.PoWriter;
 import me.whizvox.rpy2po.core.FileUtils;
 import me.whizvox.rpy2po.core.Profile;
+import me.whizvox.rpy2po.gui.DocumentChangedListener;
+import me.whizvox.rpy2po.gui.EmptyCaret;
 import me.whizvox.rpy2po.gui.GuiUtils;
 import me.whizvox.rpy2po.gui.RPY2PO;
 import me.whizvox.rpy2po.rpytl.CharacterNames;
@@ -21,10 +23,8 @@ import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
-import java.util.ResourceBundle;
 
 public class ProfileActions extends JFrame {
 
@@ -32,30 +32,53 @@ public class ProfileActions extends JFrame {
 
   private JPanel contentPane;
   private JButton buttonGenTemplate;
-  private JButton buttonImport;
+  private JButton buttonGenTranslations;
   private JButton buttonExport;
   private JButton buttonUpdate;
   private JButton buttonVerify;
   private JTextField textFieldOutLangs;
   private JButton buttonNames;
   private JButton buttonFiles;
-  private JLabel labelFeedback;
+  private JButton buttonSaveSettings;
+  private JButton buttonImport;
+  private JTextArea textAreaFeedback;
 
   private final Profile profile;
 
   public ProfileActions(Profile profile) {
     this.profile = profile;
     setContentPane(contentPane);
+    buttonSaveSettings.setEnabled(false);
+    textFieldOutLangs.setText(String.join(", ", profile.getOutputLanguages()));
+    textAreaFeedback.setCaret(new EmptyCaret());
 
     buttonGenTemplate.addActionListener(e -> generateTemplate());
+    buttonGenTranslations.addActionListener(e -> generateCatalogs());
     buttonImport.addActionListener(e -> importFiles());
+    textFieldOutLangs.getDocument().addDocumentListener((DocumentChangedListener) e -> {
+      buttonSaveSettings.setEnabled(true);
+    });
+    buttonSaveSettings.addActionListener(e -> {
+      List<String> langs = new ArrayList<>(Arrays.stream(textFieldOutLangs.getText().split(",")).map(String::trim).toList());
+      langs.remove(profile.getPrimaryLanguage());
+      textFieldOutLangs.setText(String.join(", ", langs));
+      profile.setOutputLanguages(langs);
+      try {
+        RPY2PO.inst().writeJson(profile.getFile(), profile);
+        buttonSaveSettings.setEnabled(false);
+        LOGGER.info("Updated profile at {}", profile.getFile());
+      } catch (IOException ex) {
+        LOGGER.error("Could not save profile at {}", profile.getFile(), ex);
+        GuiUtils.showErrorMessage(this, "Could not save profile", ex);
+      }
+    });
     buttonNames.addActionListener(e -> RPY2PO.inst().setFrame(() -> new SetCharacterNames(profile), "Set Names", null));
     buttonFiles.addActionListener(e -> RPY2PO.inst().setFrame(() -> new IncludeFiles(profile), "Set Files", null));
   }
 
   private void enableActions(boolean enable, boolean includeSettings) {
     buttonGenTemplate.setEnabled(enable);
-    buttonImport.setEnabled(enable);
+    buttonGenTranslations.setEnabled(enable);
     buttonExport.setEnabled(enable);
     buttonUpdate.setEnabled(enable);
     buttonVerify.setEnabled(enable);
@@ -71,17 +94,17 @@ public class ProfileActions extends JFrame {
     if (Files.exists(tlDir)) {
       int answer = JOptionPane.showConfirmDialog(this, "Do you want to delete the old translation files and generate new ones?\nWill delete directory at " + tlDir, "Question", JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
       if (answer == JOptionPane.YES_OPTION) {
-        /*try {
+        try {
           FileUtils.deleteDirectory(tlDir);
           JOptionPane.showMessageDialog(this, "Translation files have been deleted.");
         } catch (IOException e) {
           LOGGER.error("Could not delete translation files at {}", tlDir, e);
           GuiUtils.showErrorMessage(this, "Could not delete translation files", e);
           return;
-        }*/
+        }
       } else if (answer == JOptionPane.NO_OPTION) {
         showInstructions = false;
-      } else if (answer == JOptionPane.CANCEL_OPTION) {
+      } else {
         return;
       }
     }
@@ -101,7 +124,7 @@ public class ProfileActions extends JFrame {
         files = List.of();
       }
     } else {
-      files = profile.getTranslationFiles(profile.getPrimaryLanguage());
+      files = profile.getTranslationFiles(profile.getPrimaryLanguage()).stream().filter(Files::exists).toList();
     }
     if (files.isEmpty()) {
       JOptionPane.showMessageDialog(this, "No translation files have been found", "Warning!", JOptionPane.WARNING_MESSAGE);
@@ -144,6 +167,10 @@ public class ProfileActions extends JFrame {
     }
   }
 
+  private void generateCatalogs() {
+
+  }
+
   private void importFiles() {
 
   }
@@ -166,22 +193,22 @@ public class ProfileActions extends JFrame {
     contentPane = new JPanel();
     contentPane.setLayout(new GridLayoutManager(3, 3, new Insets(10, 10, 10, 10), -1, -1));
     final JPanel panel1 = new JPanel();
-    panel1.setLayout(new GridLayoutManager(8, 1, new Insets(0, 0, 10, 0), -1, 10));
+    panel1.setLayout(new GridLayoutManager(9, 1, new Insets(0, 0, 10, 0), -1, 10));
     contentPane.add(panel1, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
     buttonGenTemplate = new JButton();
     this.$$$loadButtonText$$$(buttonGenTemplate, this.$$$getMessageFromBundle$$$("strings", "button.generateTemplate"));
     panel1.add(buttonGenTemplate, new GridConstraints(2, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
     final Spacer spacer1 = new Spacer();
-    panel1.add(spacer1, new GridConstraints(7, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
-    buttonImport = new JButton();
-    buttonImport.setText("Generate PO Translations");
-    panel1.add(buttonImport, new GridConstraints(3, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
+    panel1.add(spacer1, new GridConstraints(8, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
+    buttonGenTranslations = new JButton();
+    buttonGenTranslations.setText("Generate PO Translations");
+    panel1.add(buttonGenTranslations, new GridConstraints(3, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
     buttonUpdate = new JButton();
     buttonUpdate.setText("Update PO Translations");
-    panel1.add(buttonUpdate, new GridConstraints(4, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
+    panel1.add(buttonUpdate, new GridConstraints(5, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
     buttonVerify = new JButton();
     buttonVerify.setText("Verify PO Translations");
-    panel1.add(buttonVerify, new GridConstraints(5, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
+    panel1.add(buttonVerify, new GridConstraints(6, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
     final JLabel label1 = new JLabel();
     label1.setText("Actions");
     panel1.add(label1, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
@@ -189,9 +216,12 @@ public class ProfileActions extends JFrame {
     panel1.add(spacer2, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
     buttonExport = new JButton();
     buttonExport.setText("Export Ren'Py Translations");
-    panel1.add(buttonExport, new GridConstraints(6, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
+    panel1.add(buttonExport, new GridConstraints(7, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
+    buttonImport = new JButton();
+    buttonImport.setText("Import Ren'Py Translations");
+    panel1.add(buttonImport, new GridConstraints(4, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
     final JPanel panel2 = new JPanel();
-    panel2.setLayout(new GridLayoutManager(9, 1, new Insets(0, 0, 10, 0), -1, -1));
+    panel2.setLayout(new GridLayoutManager(10, 1, new Insets(0, 0, 10, 0), -1, -1));
     contentPane.add(panel2, new GridConstraints(1, 2, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
     final JLabel label2 = new JLabel();
     label2.setText("Settings");
@@ -199,7 +229,7 @@ public class ProfileActions extends JFrame {
     final Spacer spacer3 = new Spacer();
     panel2.add(spacer3, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
     final Spacer spacer4 = new Spacer();
-    panel2.add(spacer4, new GridConstraints(8, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
+    panel2.add(spacer4, new GridConstraints(9, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
     final JLabel label3 = new JLabel();
     label3.setText("Output Language(s)");
     panel2.add(label3, new GridConstraints(2, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
@@ -207,20 +237,29 @@ public class ProfileActions extends JFrame {
     panel2.add(textFieldOutLangs, new GridConstraints(3, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(150, -1), null, 0, false));
     buttonNames = new JButton();
     buttonNames.setText("Character Names");
-    panel2.add(buttonNames, new GridConstraints(5, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    panel2.add(buttonNames, new GridConstraints(6, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     buttonFiles = new JButton();
     buttonFiles.setText("Input Files");
-    panel2.add(buttonFiles, new GridConstraints(7, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    panel2.add(buttonFiles, new GridConstraints(8, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final Spacer spacer5 = new Spacer();
-    panel2.add(spacer5, new GridConstraints(4, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 10), null, 0, false));
+    panel2.add(spacer5, new GridConstraints(5, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 10), null, 0, false));
     final Spacer spacer6 = new Spacer();
-    panel2.add(spacer6, new GridConstraints(6, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 10), null, 0, false));
+    panel2.add(spacer6, new GridConstraints(7, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 10), null, 0, false));
+    final JPanel panel3 = new JPanel();
+    panel3.setLayout(new GridLayoutManager(1, 2, new Insets(0, 0, 0, 0), -1, -1));
+    panel2.add(panel3, new GridConstraints(4, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
+    buttonSaveSettings = new JButton();
+    buttonSaveSettings.setText("Save");
+    panel3.add(buttonSaveSettings, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    final Spacer spacer7 = new Spacer();
+    panel3.add(spacer7, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
     final JSeparator separator1 = new JSeparator();
     separator1.setOrientation(1);
     contentPane.add(separator1, new GridConstraints(1, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_WANT_GROW, null, new Dimension(3, -1), null, 0, false));
-    labelFeedback = new JLabel();
-    labelFeedback.setText(" ");
-    contentPane.add(labelFeedback, new GridConstraints(2, 0, 1, 3, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    textAreaFeedback = new JTextArea();
+    textAreaFeedback.setEditable(false);
+    textAreaFeedback.setOpaque(false);
+    contentPane.add(textAreaFeedback, new GridConstraints(2, 0, 1, 3, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_WANT_GROW, null, new Dimension(-1, 50), null, 0, false));
   }
 
   private static Method $$$cachedGetBundleMethod$$$ = null;

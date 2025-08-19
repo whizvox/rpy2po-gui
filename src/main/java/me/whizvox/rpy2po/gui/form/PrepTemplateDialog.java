@@ -3,6 +3,7 @@ package me.whizvox.rpy2po.gui.form;
 import com.intellij.uiDesigner.core.GridConstraints;
 import com.intellij.uiDesigner.core.GridLayoutManager;
 import com.intellij.uiDesigner.core.Spacer;
+import me.whizvox.rpy2po.gui.EmptyCaret;
 
 import javax.swing.*;
 import java.awt.*;
@@ -22,6 +23,7 @@ public class PrepTemplateDialog extends JDialog {
     super(owner, true);
     setContentPane(contentPane);
     setTitle("Instructions");
+    textPane.setCaret(new EmptyCaret());
     textPane.setText($$$getMessageFromBundle$$$("strings", "label.prepTemplateInstructions").formatted(language));
     answer = JOptionPane.NO_OPTION;
     buttonGenerate.addActionListener(e -> {
