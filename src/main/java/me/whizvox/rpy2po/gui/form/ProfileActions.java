@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class ProfileActions extends JFrame {
 
@@ -168,7 +169,39 @@ public class ProfileActions extends JFrame {
   }
 
   private void generateCatalogs() {
-
+    Path potPath = profile.getBaseDirectory().resolve(profile.getPrimaryLanguage() + ".pot");
+    if (!Files.exists(potPath)) {
+      int answer = JOptionPane.showConfirmDialog(this, "A template file must be generated first. Would you like to do that now?");
+      if (answer == JOptionPane.YES_OPTION) {
+        generateTemplate();
+      }
+      return;
+    }
+    List<Path> missing = new ArrayList<>();
+    profile.getOutputLanguages().forEach(lang -> {
+      Path path = profile.getBaseDirectory().resolve(lang + ".po");
+      if (!Files.exists(path)) {
+        missing.add(path);
+      }
+    });
+    if (missing.isEmpty()) {
+      JOptionPane.showMessageDialog(this, "There are no PO files to generate.");
+    } else {
+      List<Map.Entry<String, Exception>> exceptions = new ArrayList<>();
+      missing.forEach(path -> {
+        try {
+          Files.copy(potPath, path);
+          LOGGER.info("Copied <{}> to <{}>", potPath, path);
+        } catch (IOException e) {
+          LOGGER.error("Could not copy <{}> to <{}>", potPath, path, e);
+          exceptions.add(Map.entry(path.getFileName().toString(), e));
+        }
+      });
+      if (!exceptions.isEmpty()) {
+        JOptionPane.showMessageDialog(this, "Could not generate all PO files!\n" + exceptions.stream().map(e -> "(" + e.getKey() + ") " + e.getValue().getClass() + ": " + e.getValue().getMessage()).collect(Collectors.joining("\n")), "Error!", JOptionPane.ERROR_MESSAGE);
+      }
+      JOptionPane.showMessageDialog(this, "Generated PO files: " + missing.stream().map(path -> path.getFileName().toString()).collect(Collectors.joining(", ")));
+    }
   }
 
   private void importFiles() {
