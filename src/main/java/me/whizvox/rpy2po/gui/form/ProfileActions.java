@@ -3,7 +3,7 @@ package me.whizvox.rpy2po.gui.form;
 import com.intellij.uiDesigner.core.GridConstraints;
 import com.intellij.uiDesigner.core.GridLayoutManager;
 import com.intellij.uiDesigner.core.Spacer;
-import com.soberlemur.potentilla.PoWriter;
+import com.soberlemur.potentilla.*;
 import me.whizvox.rpy2po.core.FileUtils;
 import me.whizvox.rpy2po.core.Profile;
 import me.whizvox.rpy2po.gui.DocumentChangedListener;
@@ -19,8 +19,10 @@ import org.slf4j.LoggerFactory;
 import javax.swing.*;
 import java.awt.*;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -56,6 +58,7 @@ public class ProfileActions extends JFrame {
     buttonGenTemplate.addActionListener(e -> generateTemplate());
     buttonGenTranslations.addActionListener(e -> generateCatalogs());
     buttonImport.addActionListener(e -> importFiles());
+    buttonUpdate.addActionListener(e -> updateFiles());
     textFieldOutLangs.getDocument().addDocumentListener((DocumentChangedListener) e -> {
       buttonSaveSettings.setEnabled(true);
     });
@@ -205,7 +208,27 @@ public class ProfileActions extends JFrame {
   }
 
   private void importFiles() {
+    JOptionPane.showMessageDialog(this, "Work in progress!");
+  }
 
+  private void updateFiles() {
+    int answer = JOptionPane.showConfirmDialog(this, "It is highly recommended that you have an up-to-date template file before doing this. Do you want to update it now?", null, JOptionPane.YES_NO_CANCEL_OPTION);
+    if (answer == JOptionPane.YES_OPTION) {
+      generateTemplate();
+    } else if (answer == JOptionPane.CANCEL_OPTION) {
+      return;
+    }
+    Path templatePath = profile.getBaseDirectory().resolve(profile.getPrimaryLanguage() + ".pot");
+    if (!Files.exists(templatePath)) {
+      JOptionPane.showMessageDialog(this, "Missing template file.");
+      return;
+    }
+    List<String> langs = SelectLanguagesDialog.prompt(this, profile, "Select which languages to update.", "Update");
+    if (langs.isEmpty()) {
+      JOptionPane.showMessageDialog(this, "No languages have been selected.");
+      return;
+    }
+    RPY2PO.inst().setFrame(() -> new ResolveTranslationProblems(profile, langs), "Resolve Problems", null);
   }
 
   {
