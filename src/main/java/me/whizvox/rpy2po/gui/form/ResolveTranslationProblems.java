@@ -7,12 +7,12 @@ import com.soberlemur.potentilla.Catalog;
 import com.soberlemur.potentilla.Message;
 import com.soberlemur.potentilla.MessageKey;
 import com.soberlemur.potentilla.PoParser;
-import me.whizvox.rpy2po.core.Pair;
+import me.whizvox.rpy2po.core.MessageSourceReferenceComparator;
 import me.whizvox.rpy2po.core.Profile;
 import me.whizvox.rpy2po.core.SimilarMessage;
 import me.whizvox.rpy2po.core.StringUtil;
-import me.whizvox.rpy2po.gettext.PoUtils;
 import me.whizvox.rpy2po.gettext.ProblemResolution;
+import me.whizvox.rpy2po.gettext.SourceReference;
 import me.whizvox.rpy2po.gui.ProblemMessagesTableModel;
 import me.whizvox.rpy2po.gui.RPY2PO;
 import me.whizvox.rpy2po.gui.SimilarStringsTableModel;
@@ -28,6 +28,7 @@ import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
+import java.util.stream.Stream;
 
 public class ResolveTranslationProblems extends JFrame {
 
@@ -58,7 +59,9 @@ public class ResolveTranslationProblems extends JFrame {
   private JButton buttonCancel;
   private JButton buttonRescan;
   private JButton buttonFinish;
-  private JButton autoResolveAllButton;
+  private JButton buttonAutoResolve;
+  private JButton buttonUnmarkResolved;
+  private JButton buttonUnresolveAll;
 
   private ProblemMessagesTableModel problemStringsModel;
   private SimilarStringsTableModel similarStringsModel;
@@ -66,14 +69,14 @@ public class ResolveTranslationProblems extends JFrame {
   private final Profile profile;
   private final List<String> languages;
   private int languageIndex;
-  private final Map<MessageKey, List<Pair<Message, Float>>> nonMatchingStrings;
   private final Set<MessageKey> missingStrings;
   private final Map<MessageKey, List<SimilarMessage>> similarStrings;
   private final Set<String> tplFiles;
   private final Set<String> langFiles;
   private String currentFile;
-  private Map<String, List<String>> searchingFiles;
+  private final Map<String, List<String>> searchingFiles;
   private final Map<MessageKey, ProblemResolution> resolutions;
+  private final Map<MessageKey, ProblemResolution> resolutionsReverse;
 
   private Catalog template;
   private Catalog translations;
@@ -82,7 +85,6 @@ public class ResolveTranslationProblems extends JFrame {
     this.profile = profile;
     this.languages = Collections.unmodifiableList(languages);
     languageIndex = 0;
-    nonMatchingStrings = new HashMap<>();
     missingStrings = new HashSet<>();
     similarStrings = new HashMap<>();
     tplFiles = new HashSet<>();
@@ -90,6 +92,7 @@ public class ResolveTranslationProblems extends JFrame {
     currentFile = null;
     searchingFiles = new HashMap<>();
     resolutions = new HashMap<>();
+    resolutionsReverse = new HashMap<>();
     template = new Catalog();
     translations = new Catalog();
 
@@ -106,16 +109,23 @@ public class ResolveTranslationProblems extends JFrame {
     });
     problemStringsModel = new ProblemMessagesTableModel();
     tableProblems.setModel(problemStringsModel);
-    tableProblems.getSelectionModel().addListSelectionListener(e -> updateTemplateStringDetails(tableProblems.getSelectionModel().getLeadSelectionIndex()));
+    tableProblems.getSelectionModel().addListSelectionListener(e -> onProblemStringSelected(getSelectedProblemRow()));
+
+    buttonUnmarkResolved.addActionListener(e -> unmarkResolved());
+    buttonUnresolveAll.addActionListener(e -> unresolveAll());
+    buttonAutoResolve.addActionListener(e -> autoResolveProblems());
+    buttonAllNew.addActionListener(e -> markAllNew());
 
     similarStringsModel = new SimilarStringsTableModel();
     tableSimilar.setModel(similarStringsModel);
-    tableSimilar.getSelectionModel().addListSelectionListener(e -> updateSimilarStringDetails(tableSimilar.getSelectionModel().getLeadSelectionIndex()));
+    tableSimilar.getSelectionModel().addListSelectionListener(e -> updateSimilarStringDetails(getSelectedSimilarRow()));
+
+    buttonUpdated.addActionListener(e -> markUpdated());
 
     buttonScan.addActionListener(e -> {
       if (tableProblems.getSelectedRow() != -1) {
         String filter = textFieldSearch.getText().trim();
-        findSimilarStrings(0.7F, filter.isEmpty() ? null : filter, checkBoxAllFiles.isSelected());
+        scanStrings(0.7F, filter.isEmpty() ? null : filter, checkBoxAllFiles.isSelected());
       }
     });
 
@@ -124,7 +134,15 @@ public class ResolveTranslationProblems extends JFrame {
 
     setContentPane(contentPane);
     initialize();
-    updateTemplateStringDetails(-1);
+    onProblemStringSelected(-1);
+  }
+
+  private int getSelectedProblemRow() {
+    return tableProblems.getSelectionModel().getLeadSelectionIndex();
+  }
+
+  private int getSelectedSimilarRow() {
+    return tableSimilar.getSelectionModel().getLeadSelectionIndex();
   }
 
   private void initialize() {
@@ -133,19 +151,19 @@ public class ResolveTranslationProblems extends JFrame {
       Path langPath = profile.getBaseDirectory().resolve(languages.get(languageIndex) + ".po");
       template = new PoParser().parseCatalog(tplPath.toFile());
       translations = new PoParser().parseCatalog(langPath.toFile());
-      nonMatchingStrings.clear();
+      similarStrings.clear();
       tplFiles.clear();
       for (Message msg : template) {
-        msg.getSourceReferences().stream().map(str -> PoUtils.parseReference(str).file()).forEach(tplFiles::add);
+        msg.getSourceReferences().stream().map(str -> SourceReference.parse(str).file()).forEach(tplFiles::add);
         MessageKey key = new MessageKey(msg);
         if (!translations.contains(key)) {
-          nonMatchingStrings.put(key, new ArrayList<>());
+          similarStrings.put(key, new ArrayList<>());
         }
       }
       missingStrings.clear();
       langFiles.clear();
       for (Message msg : translations) {
-        msg.getSourceReferences().stream().map(str -> PoUtils.parseReference(str).file()).forEach(langFiles::add);
+        msg.getSourceReferences().stream().map(str -> SourceReference.parse(str).file()).forEach(langFiles::add);
         MessageKey key = new MessageKey(msg);
         if (!template.contains(key)) {
           missingStrings.add(key);
@@ -166,74 +184,18 @@ public class ResolveTranslationProblems extends JFrame {
         searchingFiles.computeIfAbsent(currentFile, s -> new ArrayList<>()).add(currentFile);
       }
       updateSearchingFiles();
-      /*progressMonitor.setMaximum(nonMatching.size());
-      progressMonitor.setNote("Finding similar strings...");
-      int count = 0;
-      for (var entry : nonMatching.entrySet()) {
-        List<Pair<Message, Float>> similarStrings = entry.getValue();
-        if (progressMonitor.isCanceled()) {
-          throw new InterruptedException();
-        }
-        Message msg = template.get(entry.getKey());
-        for (MessageKey missingKey : missing) {
-          if (progressMonitor.isCanceled()) {
-            throw new InterruptedException();
-          }
-          Message missingMsg = translations.get(missingKey);
-          if (msg.getMsgId().equals(missingMsg.getMsgId())) {
-            similarStrings.add(Pair.of(missingMsg, 1.0F));
-          } else {
-            int max = Math.max(msg.getMsgId().length(), missingMsg.getMsgId().length());
-            int dist = StringUtil.getEditDistance(msg.getMsgId(), missingMsg.getMsgId());
-            float score = 1.0F - (float) dist / max;
-            if (score >= 0.7F) {
-              similarStrings.add(Pair.of(missingMsg, score));
-            }
-          }
-        }
-        progressMonitor.setProgress(++count);
-      }*/
     } catch (Exception e) {
-
+      LOGGER.error("Could not initialize", e);
     }
   }
 
   private void setCurrentFile(String file) {
     currentFile = file;
     problemStringsModel.clear();
-    nonMatchingStrings.keySet().stream()
+    similarStrings.keySet().stream()
         .map(key -> template.get(key))
-        .filter(msg -> msg.getSourceReferences().stream().map(str -> PoUtils.parseReference(str).file()).anyMatch(str -> str.equals(file)))
-        .sorted((o1, o2) -> {
-          PoUtils.Reference ref1 = null;
-          PoUtils.Reference ref2 = null;
-          if (o1.getSourceReferences().size() == 1) {
-            ref1 = PoUtils.parseReference(o1.getSourceReferences().getFirst());
-          } else {
-            for (String refStr : o1.getSourceReferences()) {
-              var ref = PoUtils.parseReference(refStr);
-              if (ref.file().equals(file)) {
-                ref1 = ref;
-                break;
-              }
-            }
-          }
-          if (o2.getSourceReferences().size() == 1) {
-            ref2 = PoUtils.parseReference(o2.getSourceReferences().getFirst());
-          } else {
-            for (String refStr : o2.getSourceReferences()) {
-              var ref = PoUtils.parseReference(refStr);
-              if (ref.file().equals(file)) {
-                ref2 = ref;
-                break;
-              }
-            }
-          }
-          if (ref1 == null || ref2 == null) {
-            return 0;
-          }
-          return Integer.compare(ref1.line(), ref2.line());
-        })
+        .filter(msg -> msg.getSourceReferences().stream().map(str -> SourceReference.parse(str).file()).anyMatch(str -> str.equals(file)))
+        .sorted(new MessageSourceReferenceComparator())
         .forEach(msg -> problemStringsModel.addValue(false, new MessageKey(msg)));
     problemStringsModel.fireTableDataChanged();
     List<String> files = searchingFiles.computeIfAbsent(currentFile, s -> new ArrayList<>());
@@ -256,12 +218,15 @@ public class ResolveTranslationProblems extends JFrame {
     similarStringsModel.fireTableDataChanged();
   }
 
-  private void updateTemplateStringDetails(int row) {
+  private void onProblemStringSelected(int row) {
     if (row < 0 || row >= problemStringsModel.getRowCount()) {
       labelTplRef.setText(" ");
       labelTplContext.setText(" ");
       labelTplComment.setText(" ");
       textAreaTplString.setText("");
+      similarStringsModel.clear();
+      similarStringsModel.fireTableDataChanged();
+      updateSimilarStringDetails(-1);
     } else {
       MessageKey key = problemStringsModel.getKey(row);
       Message msg = template.get(key);
@@ -269,7 +234,106 @@ public class ResolveTranslationProblems extends JFrame {
       labelTplContext.setText(key.msgContext());
       labelTplComment.setText(String.join(", ", msg.getExtractedComments()));
       textAreaTplString.setText(key.msgId());
+      similarStringsModel.setValues(similarStrings.computeIfAbsent(key, k -> new ArrayList<>()));
+      similarStringsModel.fireTableDataChanged();
+      if (similarStringsModel.getRowCount() > 0) {
+        tableSimilar.getSelectionModel().setLeadSelectionIndex(0);
+      }
     }
+  }
+
+  private void unmarkResolved() {
+    int row = getSelectedProblemRow();
+    if (problemStringsModel.isResolved(row)) {
+      MessageKey key = problemStringsModel.getKey(row);
+      ProblemResolution resolution = resolutions.get(key);
+      resolutions.remove(key);
+      if (resolution.langKey() != null) {
+        resolutionsReverse.remove(resolution.langKey());
+      }
+      problemStringsModel.markResolved(row, false);
+      problemStringsModel.fireTableRowsUpdated(row, row);
+    }
+  }
+
+  private void unresolveAll() {
+    for (int row = 0; row < problemStringsModel.getRowCount(); row++) {
+      if (problemStringsModel.isResolved(row)) {
+        MessageKey key = problemStringsModel.getKey(row);
+        ProblemResolution resolution = resolutions.get(key);
+        resolutions.remove(key);
+        if (resolution.langKey() != null) {
+          resolutionsReverse.remove(resolution.langKey());
+        }
+        problemStringsModel.markResolved(row, false);
+      }
+    }
+    problemStringsModel.fireTableRowsUpdated(0, problemStringsModel.getRowCount());
+  }
+
+  private void markUpdated() {
+    int problemRow = getSelectedProblemRow();
+    int similarRow = getSelectedSimilarRow();
+    if (problemRow != -1 && similarRow != -1) {
+      MessageKey tplKey = problemStringsModel.getKey(problemRow);
+      MessageKey langKey = similarStringsModel.getKey(similarRow);
+      Message langMsg = translations.get(langKey);
+      if (tplKey != null && langKey != null && langMsg != null) {
+        ProblemResolution resolution = new ProblemResolution(tplKey, langKey, langMsg.getMsgstr(), false, false);
+        resolutions.put(tplKey, resolution);
+        resolutionsReverse.put(langKey, resolution);
+        problemStringsModel.markResolved(problemRow);
+        problemStringsModel.fireTableRowsUpdated(problemRow, problemRow);
+      }
+    }
+  }
+
+  private void autoResolveProblems() {
+    if (!searchingFiles.get(currentFile).isEmpty()) {
+      ProgressMonitor monitor = new ProgressMonitor(this, "Finding similar strings...", "", 0, problemStringsModel.getRowCount());
+      monitor.setMillisToPopup(100);
+      Thread thread = new Thread(() -> {
+        for (int row = 0; row < problemStringsModel.getRowCount(); row++) {
+          if (monitor.isCanceled()) {
+            break;
+          }
+          if (!problemStringsModel.isResolved(row)) {
+            MessageKey key = problemStringsModel.getKey(row);
+            if (key.msgId().length() > 50) {
+              monitor.setNote(key.msgId().substring(0, 50) + "...");
+            } else {
+              monitor.setNote(key.msgId());
+            }
+            List<SimilarMessage> similar = findSimilarStrings(key, 0.7F, null, false);
+            if (similar.size() == 1) {
+              SimilarMessage msg = similar.getFirst();
+              ProblemResolution resolution = new ProblemResolution(key, msg.key(), msg.key().msgId(), false, false);
+              resolutions.put(key, resolution);
+              resolutionsReverse.put(msg.key(), resolution);
+              problemStringsModel.markResolved(row);
+            } else if (similar.isEmpty()) {
+              ProblemResolution resolution = new ProblemResolution(key, null, null, false, true);
+              resolutions.put(key, resolution);
+              problemStringsModel.markResolved(row);
+            }
+          }
+          monitor.setProgress(row + 1);
+        }
+        problemStringsModel.fireTableRowsUpdated(0, problemStringsModel.getRowCount());
+      });
+      thread.start();
+    }
+  }
+
+  private void markAllNew() {
+    for (int row = 0; row < problemStringsModel.getRowCount(); row++) {
+      if (!problemStringsModel.isResolved(row)) {
+        MessageKey key = problemStringsModel.getKey(row);
+        resolutions.put(key, new ProblemResolution(key, null, null, false, true));
+        problemStringsModel.markResolved(row);
+      }
+    }
+    problemStringsModel.fireTableRowsUpdated(0, problemStringsModel.getRowCount());
   }
 
   private void updateSimilarStringDetails(int row) {
@@ -288,8 +352,7 @@ public class ResolveTranslationProblems extends JFrame {
     }
   }
 
-  private void findSimilarStrings(float threshold, String filter, boolean scanAllFiles) {
-    MessageKey key = problemStringsModel.getKey(tableProblems.getSelectionModel().getLeadSelectionIndex());
+  private List<SimilarMessage> findSimilarStrings(MessageKey key, float threshold, String filter, boolean scanAllFiles) {
     List<SimilarMessage> similar = similarStrings.computeIfAbsent(key, k -> new ArrayList<>());
     similar.clear();
     Collection<String> files;
@@ -298,10 +361,14 @@ public class ResolveTranslationProblems extends JFrame {
     } else {
       files = searchingFiles.get(currentFile);
     }
+    Stream<Message> stream = missingStrings.stream()
+        .filter(langKey -> !resolutionsReverse.containsKey(langKey))
+        .map(langKey -> translations.get(langKey))
+        .sorted(new MessageSourceReferenceComparator());
     if (filter == null) {
       Message tplMsg = template.get(key);
-      translations.forEach(msg -> {
-        if (msg.getSourceReferences().stream().map(str -> PoUtils.parseReference(str).file()).anyMatch(files::contains)) {
+      stream.forEach(msg -> {
+        if (msg.getSourceReferences().stream().map(str -> SourceReference.parse(str).file()).anyMatch(files::contains)) {
           int max = Math.max(tplMsg.getMsgId().length(), msg.getMsgId().length());
           int dist = StringUtil.getEditDistance(tplMsg.getMsgId(), msg.getMsgId());
           float similarity = 1.0F - (float) dist / max;
@@ -312,8 +379,8 @@ public class ResolveTranslationProblems extends JFrame {
       });
     } else {
       String actualFilter = filter.toLowerCase();
-      translations.forEach(msg -> {
-        if (msg.getSourceReferences().stream().map(str -> PoUtils.parseReference(str).file()).anyMatch(files::contains)) {
+      stream.forEach(msg -> {
+        if (msg.getSourceReferences().stream().map(str -> SourceReference.parse(str).file()).anyMatch(files::contains)) {
           if (msg.getMsgId().toLowerCase().contains(actualFilter)) {
             similar.add(new SimilarMessage(new MessageKey(msg), 1.0F));
           }
@@ -321,6 +388,12 @@ public class ResolveTranslationProblems extends JFrame {
       });
     }
     similar.sort((o1, o2) -> Float.compare(o2.similarity(), o1.similarity()));
+    return similar;
+  }
+
+  private void scanStrings(float threshold, String filter, boolean scanAllFiles) {
+    MessageKey key = problemStringsModel.getKey(getSelectedProblemRow());
+    List<SimilarMessage> similar = findSimilarStrings(key, threshold, filter, scanAllFiles);
     similarStringsModel.setValues(similar);
     similarStringsModel.fireTableDataChanged();
   }
@@ -392,16 +465,19 @@ public class ResolveTranslationProblems extends JFrame {
     textAreaTplString.setOpaque(false);
     scrollPane1.setViewportView(textAreaTplString);
     final JPanel panel2 = new JPanel();
-    panel2.setLayout(new GridLayoutManager(1, 3, new Insets(0, 0, 0, 0), -1, -1));
+    panel2.setLayout(new GridLayoutManager(1, 5, new Insets(0, 0, 0, 0), -1, -1));
     panelTemplate.add(panel2, new GridConstraints(12, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
     buttonAllNew = new JButton();
     buttonAllNew.setText("Mark All as New");
-    panel2.add(buttonAllNew, new GridConstraints(0, 2, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    panel2.add(buttonAllNew, new GridConstraints(0, 4, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final Spacer spacer1 = new Spacer();
-    panel2.add(spacer1, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
-    autoResolveAllButton = new JButton();
-    autoResolveAllButton.setText("Auto-Resolve All");
-    panel2.add(autoResolveAllButton, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    panel2.add(spacer1, new GridConstraints(0, 2, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
+    buttonAutoResolve = new JButton();
+    buttonAutoResolve.setText("Auto-Resolve All");
+    panel2.add(buttonAutoResolve, new GridConstraints(0, 3, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    buttonUnresolveAll = new JButton();
+    buttonUnresolveAll.setText("Unresolve All");
+    panel2.add(buttonUnresolveAll, new GridConstraints(0, 0, 1, 2, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final JScrollPane scrollPane2 = new JScrollPane();
     panelTemplate.add(scrollPane2, new GridConstraints(11, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
     tableProblems = new JTable();
@@ -413,13 +489,16 @@ public class ResolveTranslationProblems extends JFrame {
     final JSeparator separator1 = new JSeparator();
     panelTemplate.add(separator1, new GridConstraints(9, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
     final JPanel panel3 = new JPanel();
-    panel3.setLayout(new GridLayoutManager(1, 2, new Insets(0, 0, 0, 0), -1, -1));
+    panel3.setLayout(new GridLayoutManager(1, 3, new Insets(0, 0, 0, 0), -1, -1));
     panelTemplate.add(panel3, new GridConstraints(8, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
     buttonNew = new JButton();
     buttonNew.setText("Mark as New");
-    panel3.add(buttonNew, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    panel3.add(buttonNew, new GridConstraints(0, 2, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final Spacer spacer2 = new Spacer();
-    panel3.add(spacer2, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
+    panel3.add(spacer2, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
+    buttonUnmarkResolved = new JButton();
+    buttonUnmarkResolved.setText("Unmark Resolved");
+    panel3.add(buttonUnmarkResolved, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final JLabel label7 = new JLabel();
     label7.setText("Reference");
     panelTemplate.add(label7, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
