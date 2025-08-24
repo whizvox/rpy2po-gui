@@ -127,8 +127,8 @@ public class UpdateResolver {
             matches.forEach(pair -> foundMatch.add(new MessageKey(pair.left())));
           }
         } else {
-          if (prevResolution.setMsgstr() != null) {
-            newMsg.setMsgstr(prevResolution.setMsgstr());
+          if (prevResolution.updateMsgstr() != null) {
+            newMsg.setMsgstr(prevResolution.updateMsgstr());
           }
         }
       } else {
@@ -209,8 +209,8 @@ public class UpdateResolver {
       if (msg == null) {
         LOGGER.warn("Attempted to solve a merge conflict with a non-existent key: {}", resolution.templateKey());
       } else {
-        if (resolution.setMsgstr() != null) {
-          result.get(resolution.templateKey()).setMsgstr(resolution.setMsgstr());
+        if (resolution.updateMsgstr() != null) {
+          result.get(resolution.templateKey()).setMsgstr(resolution.updateMsgstr());
         } else if (resolution.markObsolete()) {
           result.get(resolution.templateKey()).markObsolete();
         } else if (!resolution.markNew()) {

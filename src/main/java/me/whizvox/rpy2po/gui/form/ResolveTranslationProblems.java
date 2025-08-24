@@ -9,9 +9,13 @@ import com.soberlemur.potentilla.MessageKey;
 import com.soberlemur.potentilla.PoParser;
 import me.whizvox.rpy2po.core.Pair;
 import me.whizvox.rpy2po.core.Profile;
+import me.whizvox.rpy2po.core.SimilarMessage;
+import me.whizvox.rpy2po.core.StringUtil;
 import me.whizvox.rpy2po.gettext.PoUtils;
+import me.whizvox.rpy2po.gettext.ProblemResolution;
 import me.whizvox.rpy2po.gui.ProblemMessagesTableModel;
 import me.whizvox.rpy2po.gui.RPY2PO;
+import me.whizvox.rpy2po.gui.SimilarStringsTableModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,17 +60,20 @@ public class ResolveTranslationProblems extends JFrame {
   private JButton buttonFinish;
   private JButton autoResolveAllButton;
 
-  private ProblemMessagesTableModel problemStrings;
+  private ProblemMessagesTableModel problemStringsModel;
+  private SimilarStringsTableModel similarStringsModel;
 
   private final Profile profile;
   private final List<String> languages;
   private int languageIndex;
   private final Map<MessageKey, List<Pair<Message, Float>>> nonMatchingStrings;
   private final Set<MessageKey> missingStrings;
+  private final Map<MessageKey, List<SimilarMessage>> similarStrings;
   private final Set<String> tplFiles;
   private final Set<String> langFiles;
   private String currentFile;
   private Map<String, List<String>> searchingFiles;
+  private final Map<MessageKey, ProblemResolution> resolutions;
 
   private Catalog template;
   private Catalog translations;
@@ -77,10 +84,12 @@ public class ResolveTranslationProblems extends JFrame {
     languageIndex = 0;
     nonMatchingStrings = new HashMap<>();
     missingStrings = new HashSet<>();
+    similarStrings = new HashMap<>();
     tplFiles = new HashSet<>();
     langFiles = new HashSet<>();
     currentFile = null;
     searchingFiles = new HashMap<>();
+    resolutions = new HashMap<>();
     template = new Catalog();
     translations = new Catalog();
 
@@ -95,9 +104,20 @@ public class ResolveTranslationProblems extends JFrame {
         updateSearchingFiles();
       }
     });
-    problemStrings = new ProblemMessagesTableModel();
-    tableProblems.setModel(problemStrings);
+    problemStringsModel = new ProblemMessagesTableModel();
+    tableProblems.setModel(problemStringsModel);
     tableProblems.getSelectionModel().addListSelectionListener(e -> updateTemplateStringDetails(tableProblems.getSelectionModel().getLeadSelectionIndex()));
+
+    similarStringsModel = new SimilarStringsTableModel();
+    tableSimilar.setModel(similarStringsModel);
+    tableSimilar.getSelectionModel().addListSelectionListener(e -> updateSimilarStringDetails(tableSimilar.getSelectionModel().getLeadSelectionIndex()));
+
+    buttonScan.addActionListener(e -> {
+      if (tableProblems.getSelectedRow() != -1) {
+        String filter = textFieldSearch.getText().trim();
+        findSimilarStrings(0.7F, filter.isEmpty() ? null : filter, checkBoxAllFiles.isSelected());
+      }
+    });
 
     buttonRescan.addActionListener(e -> initialize());
     buttonCancel.addActionListener(e -> RPY2PO.inst().setFrame(() -> new ProfileActions(profile), profile.getName(), null));
@@ -180,7 +200,7 @@ public class ResolveTranslationProblems extends JFrame {
 
   private void setCurrentFile(String file) {
     currentFile = file;
-    problemStrings.clear();
+    problemStringsModel.clear();
     nonMatchingStrings.keySet().stream()
         .map(key -> template.get(key))
         .filter(msg -> msg.getSourceReferences().stream().map(str -> PoUtils.parseReference(str).file()).anyMatch(str -> str.equals(file)))
@@ -214,8 +234,8 @@ public class ResolveTranslationProblems extends JFrame {
           }
           return Integer.compare(ref1.line(), ref2.line());
         })
-        .forEach(msg -> problemStrings.addValue(false, new MessageKey(msg)));
-    problemStrings.fireTableDataChanged();
+        .forEach(msg -> problemStringsModel.addValue(false, new MessageKey(msg)));
+    problemStringsModel.fireTableDataChanged();
     List<String> files = searchingFiles.computeIfAbsent(currentFile, s -> new ArrayList<>());
     if (files.isEmpty() && langFiles.contains(currentFile)) {
       files.add(currentFile);
@@ -227,25 +247,82 @@ public class ResolveTranslationProblems extends JFrame {
     List<String> files = searchingFiles.computeIfAbsent(currentFile, l -> new ArrayList<>());
     if (files.isEmpty()) {
       labelFiles.setText("(nothing...)");
+      labelFiles.setForeground(Color.RED);
+      similarStringsModel.clear();
     } else {
       labelFiles.setText(String.join(", ", files));
+      labelFiles.setForeground(Color.BLACK);
     }
+    similarStringsModel.fireTableDataChanged();
   }
 
   private void updateTemplateStringDetails(int row) {
-    if (row < 0 || row >= problemStrings.getRowCount()) {
+    if (row < 0 || row >= problemStringsModel.getRowCount()) {
       labelTplRef.setText(" ");
       labelTplContext.setText(" ");
       labelTplComment.setText(" ");
-      textAreaTplString.setText(" ");
+      textAreaTplString.setText("");
     } else {
-      MessageKey key = problemStrings.getKey(row);
+      MessageKey key = problemStringsModel.getKey(row);
       Message msg = template.get(key);
       labelTplRef.setText(String.join(", ", msg.getSourceReferences()));
       labelTplContext.setText(key.msgContext());
       labelTplComment.setText(String.join(", ", msg.getExtractedComments()));
       textAreaTplString.setText(key.msgId());
     }
+  }
+
+  private void updateSimilarStringDetails(int row) {
+    if (row < 0 || row >= similarStringsModel.getRowCount()) {
+      labelLangRef.setText(" ");
+      labelLangContext.setText(" ");
+      labelLangComment.setText(" ");
+      textAreaLangString.setText("");
+    } else {
+      MessageKey key = similarStringsModel.getKey(row);
+      Message msg = translations.get(key);
+      labelLangRef.setText(String.join(", ", msg.getSourceReferences()));
+      labelLangContext.setText(key.msgContext());
+      labelLangComment.setText(String.join(", ", msg.getExtractedComments()));
+      textAreaLangString.setText(key.msgId());
+    }
+  }
+
+  private void findSimilarStrings(float threshold, String filter, boolean scanAllFiles) {
+    MessageKey key = problemStringsModel.getKey(tableProblems.getSelectionModel().getLeadSelectionIndex());
+    List<SimilarMessage> similar = similarStrings.computeIfAbsent(key, k -> new ArrayList<>());
+    similar.clear();
+    Collection<String> files;
+    if (scanAllFiles) {
+      files = langFiles;
+    } else {
+      files = searchingFiles.get(currentFile);
+    }
+    if (filter == null) {
+      Message tplMsg = template.get(key);
+      translations.forEach(msg -> {
+        if (msg.getSourceReferences().stream().map(str -> PoUtils.parseReference(str).file()).anyMatch(files::contains)) {
+          int max = Math.max(tplMsg.getMsgId().length(), msg.getMsgId().length());
+          int dist = StringUtil.getEditDistance(tplMsg.getMsgId(), msg.getMsgId());
+          float similarity = 1.0F - (float) dist / max;
+          if (similarity >= threshold) {
+            similar.add(new SimilarMessage(new MessageKey(msg), similarity));
+          }
+        }
+      });
+    } else {
+      String actualFilter = filter.toLowerCase();
+      translations.forEach(msg -> {
+        if (msg.getSourceReferences().stream().map(str -> PoUtils.parseReference(str).file()).anyMatch(files::contains)) {
+          if (msg.getMsgId().toLowerCase().contains(actualFilter)) {
+            similar.add(new SimilarMessage(new MessageKey(msg), 1.0F));
+          }
+        }
+      });
+    }
+    similar.sort((o1, o2) -> Float.compare(o2.similarity(), o1.similarity()));
+    similarStringsModel.setValues(similar);
+    similarStringsModel.fireTableDataChanged();
   }
 
   {
