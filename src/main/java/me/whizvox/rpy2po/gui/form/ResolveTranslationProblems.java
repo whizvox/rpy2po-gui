@@ -62,15 +62,16 @@ public class ResolveTranslationProblems extends JFrame {
   private JButton buttonAutoResolve;
   private JButton buttonUnmarkResolved;
   private JButton buttonUnresolveAll;
+  private JCheckBox checkBoxShowAllProblems;
 
-  private ProblemMessagesTableModel problemStringsModel;
-  private SimilarStringsTableModel similarStringsModel;
+  private final ProblemMessagesTableModel problemStringsModel;
+  private final SimilarStringsTableModel similarStringsModel;
 
   private final Profile profile;
   private final List<String> languages;
   private int languageIndex;
   private final Set<MessageKey> missingStrings;
-  private final Map<MessageKey, List<SimilarMessage>> similarStrings;
+  private final Map<MessageKey, List<SimilarMessage>> problemStrings;
   private final Set<String> tplFiles;
   private final Set<String> langFiles;
   private String currentFile;
@@ -86,7 +87,7 @@ public class ResolveTranslationProblems extends JFrame {
     this.languages = Collections.unmodifiableList(languages);
     languageIndex = 0;
     missingStrings = new HashSet<>();
-    similarStrings = new HashMap<>();
+    problemStrings = new HashMap<>();
     tplFiles = new HashSet<>();
     langFiles = new HashSet<>();
     currentFile = null;
@@ -110,6 +111,10 @@ public class ResolveTranslationProblems extends JFrame {
     problemStringsModel = new ProblemMessagesTableModel();
     tableProblems.setModel(problemStringsModel);
     tableProblems.getSelectionModel().addListSelectionListener(e -> onProblemStringSelected(getSelectedProblemRow()));
+    checkBoxShowAllProblems.addActionListener(e -> {
+      problemStringsModel.toggleShowAll(checkBoxShowAllProblems.isSelected());
+      problemStringsModel.fireTableDataChanged();
+    });
 
     buttonUnmarkResolved.addActionListener(e -> unmarkResolved());
     buttonUnresolveAll.addActionListener(e -> unresolveAll());
@@ -151,13 +156,13 @@ public class ResolveTranslationProblems extends JFrame {
       Path langPath = profile.getBaseDirectory().resolve(languages.get(languageIndex) + ".po");
       template = new PoParser().parseCatalog(tplPath.toFile());
       translations = new PoParser().parseCatalog(langPath.toFile());
-      similarStrings.clear();
+      problemStrings.clear();
       tplFiles.clear();
       for (Message msg : template) {
         msg.getSourceReferences().stream().map(str -> SourceReference.parse(str).file()).forEach(tplFiles::add);
         MessageKey key = new MessageKey(msg);
         if (!translations.contains(key)) {
-          similarStrings.put(key, new ArrayList<>());
+          problemStrings.put(key, new ArrayList<>());
         }
       }
       missingStrings.clear();
@@ -192,7 +197,7 @@ public class ResolveTranslationProblems extends JFrame {
   private void setCurrentFile(String file) {
     currentFile = file;
     problemStringsModel.clear();
-    similarStrings.keySet().stream()
+    problemStrings.keySet().stream()
         .map(key -> template.get(key))
         .filter(msg -> msg.getSourceReferences().stream().map(str -> SourceReference.parse(str).file()).anyMatch(str -> str.equals(file)))
         .sorted(new MessageSourceReferenceComparator())
@@ -234,10 +239,12 @@ public class ResolveTranslationProblems extends JFrame {
       labelTplContext.setText(key.msgContext());
       labelTplComment.setText(String.join(", ", msg.getExtractedComments()));
       textAreaTplString.setText(key.msgId());
-      similarStringsModel.setValues(similarStrings.computeIfAbsent(key, k -> new ArrayList<>()));
+      similarStringsModel.setValues(problemStrings.computeIfAbsent(key, k -> new ArrayList<>()));
       similarStringsModel.fireTableDataChanged();
       if (similarStringsModel.getRowCount() > 0) {
-        tableSimilar.getSelectionModel().setLeadSelectionIndex(0);
+        tableSimilar.clearSelection();
+        tableSimilar.setRowSelectionInterval(0, 0);
+        updateSimilarStringDetails(0);
       }
     }
   }
@@ -279,20 +286,42 @@ public class ResolveTranslationProblems extends JFrame {
       MessageKey langKey = similarStringsModel.getKey(similarRow);
       Message langMsg = translations.get(langKey);
       if (tplKey != null && langKey != null && langMsg != null) {
+        ProblemResolution oldResolution = resolutionsReverse.get(langKey);
+        if (oldResolution != null) {
+          int answer = JOptionPane.showConfirmDialog(this, "This string has already been marked as being updated to " + oldResolution.templateKey().msgContext() + ". Do you want to override this?", "Question", JOptionPane.YES_NO_OPTION);
+          if (answer == JOptionPane.YES_OPTION) {
+            resolutions.remove(oldResolution.templateKey());
+            resolutionsReverse.remove(langKey);
+            for (int row = 0; row < problemStringsModel.getRowCount(); row++) {
+              if (problemStringsModel.getKey(row).equals(oldResolution.templateKey())) {
+                problemStringsModel.markResolved(row, false);
+                break;
+              }
+            }
+          } else {
+            return;
+          }
+        }
         ProblemResolution resolution = new ProblemResolution(tplKey, langKey, langMsg.getMsgstr(), false, false);
         resolutions.put(tplKey, resolution);
         resolutionsReverse.put(langKey, resolution);
         problemStringsModel.markResolved(problemRow);
-        problemStringsModel.fireTableRowsUpdated(problemRow, problemRow);
+        problemStringsModel.fireTableDataChanged();
+        if (!problemStringsModel.isShowingAll() && problemStringsModel.getRowCount() > 0) {
+          tableProblems.setRowSelectionInterval(0, 0);
+        }
       }
     }
   }
 
   private void autoResolveProblems() {
-    if (!searchingFiles.get(currentFile).isEmpty()) {
+    if (searchingFiles.get(currentFile).isEmpty()) {
+      JOptionPane.showMessageDialog(this, "No search files are selected.");
+    } else {
       ProgressMonitor monitor = new ProgressMonitor(this, "Finding similar strings...", "", 0, problemStringsModel.getRowCount());
       monitor.setMillisToPopup(100);
       Thread thread = new Thread(() -> {
+        List<Integer> rows = new ArrayList<>();
         for (int row = 0; row < problemStringsModel.getRowCount(); row++) {
           if (monitor.isCanceled()) {
             break;
@@ -310,16 +339,20 @@ public class ResolveTranslationProblems extends JFrame {
               ProblemResolution resolution = new ProblemResolution(key, msg.key(), msg.key().msgId(), false, false);
               resolutions.put(key, resolution);
               resolutionsReverse.put(msg.key(), resolution);
-              problemStringsModel.markResolved(row);
+              rows.add(row);
             } else if (similar.isEmpty()) {
               ProblemResolution resolution = new ProblemResolution(key, null, null, false, true);
               resolutions.put(key, resolution);
-              problemStringsModel.markResolved(row);
+              rows.add(row);
             }
           }
           monitor.setProgress(row + 1);
         }
-        problemStringsModel.fireTableRowsUpdated(0, problemStringsModel.getRowCount());
+        // if show all is unchecked
+        for (int i = rows.size() - 1; i >= 0; i--) {
+          problemStringsModel.markResolved(rows.get(i));
+        }
+        problemStringsModel.fireTableDataChanged();
       });
       thread.start();
     }
@@ -353,7 +386,7 @@ public class ResolveTranslationProblems extends JFrame {
   }
 
   private List<SimilarMessage> findSimilarStrings(MessageKey key, float threshold, String filter, boolean scanAllFiles) {
-    List<SimilarMessage> similar = similarStrings.computeIfAbsent(key, k -> new ArrayList<>());
+    List<SimilarMessage> similar = problemStrings.computeIfAbsent(key, k -> new ArrayList<>());
     similar.clear();
     Collection<String> files;
     if (scanAllFiles) {
@@ -396,6 +429,16 @@ public class ResolveTranslationProblems extends JFrame {
     List<SimilarMessage> similar = findSimilarStrings(key, threshold, filter, scanAllFiles);
     similarStringsModel.setValues(similar);
     similarStringsModel.fireTableDataChanged();
+  }
+
+  private void finish() {
+    List<MessageKey> unresolved = problemStrings.keySet().stream()
+        .filter(key -> !resolutions.containsKey(key))
+        .sorted()
+        .toList();
+    if (!unresolved.isEmpty()) {
+      int answer = JOptionPane.showConfirmDialog(this, "Found ");
+    }
   }
 
   {
@@ -483,9 +526,6 @@ public class ResolveTranslationProblems extends JFrame {
     tableProblems = new JTable();
     tableProblems.setPreferredScrollableViewportSize(new Dimension(300, 200));
     scrollPane2.setViewportView(tableProblems);
-    final JLabel label6 = new JLabel();
-    label6.setText("Problematic Strings");
-    panelTemplate.add(label6, new GridConstraints(10, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final JSeparator separator1 = new JSeparator();
     panelTemplate.add(separator1, new GridConstraints(9, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
     final JPanel panel3 = new JPanel();
@@ -499,14 +539,26 @@ public class ResolveTranslationProblems extends JFrame {
     buttonUnmarkResolved = new JButton();
     buttonUnmarkResolved.setText("Unmark Resolved");
     panel3.add(buttonUnmarkResolved, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
-    final JLabel label7 = new JLabel();
-    label7.setText("Reference");
-    panelTemplate.add(label7, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    final JLabel label6 = new JLabel();
+    label6.setText("Reference");
+    panelTemplate.add(label6, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     labelTplRef = new JLabel();
     Font labelTplRefFont = this.$$$getFont$$$("Consolas", Font.PLAIN, -1, labelTplRef.getFont());
     if (labelTplRefFont != null) labelTplRef.setFont(labelTplRefFont);
     labelTplRef.setText("file.rpy:123");
     panelTemplate.add(labelTplRef, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    final JPanel panel4 = new JPanel();
+    panel4.setLayout(new GridLayoutManager(1, 3, new Insets(0, 0, 0, 0), -1, -1));
+    panelTemplate.add(panel4, new GridConstraints(10, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
+    final JLabel label7 = new JLabel();
+    label7.setText("Problematic Strings");
+    panel4.add(label7, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_SOUTHWEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    final Spacer spacer3 = new Spacer();
+    panel4.add(spacer3, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
+    checkBoxShowAllProblems = new JCheckBox();
+    checkBoxShowAllProblems.setSelected(true);
+    checkBoxShowAllProblems.setText("Show All");
+    panel4.add(checkBoxShowAllProblems, new GridConstraints(0, 2, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     panelLang = new JPanel();
     panelLang.setLayout(new GridLayoutManager(13, 1, new Insets(5, 5, 5, 5), -1, -1));
     panel1.add(panelLang, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
@@ -547,28 +599,28 @@ public class ResolveTranslationProblems extends JFrame {
     tableSimilar = new JTable();
     tableSimilar.setPreferredScrollableViewportSize(new Dimension(300, 200));
     scrollPane4.setViewportView(tableSimilar);
-    final JPanel panel4 = new JPanel();
-    panel4.setLayout(new GridLayoutManager(2, 2, new Insets(0, 0, 0, 0), -1, -1));
-    panelLang.add(panel4, new GridConstraints(12, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
+    final JPanel panel5 = new JPanel();
+    panel5.setLayout(new GridLayoutManager(2, 2, new Insets(0, 0, 0, 0), -1, -1));
+    panelLang.add(panel5, new GridConstraints(12, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
     buttonScan = new JButton();
     buttonScan.setText("Scan");
-    panel4.add(buttonScan, new GridConstraints(1, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    panel5.add(buttonScan, new GridConstraints(1, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     textFieldSearch = new JTextField();
-    panel4.add(textFieldSearch, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(150, -1), null, 0, false));
+    panel5.add(textFieldSearch, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(150, -1), null, 0, false));
     final JLabel label12 = new JLabel();
     label12.setText("Search Strings");
-    panel4.add(label12, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    panel5.add(label12, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_SOUTHWEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     checkBoxAllFiles = new JCheckBox();
     checkBoxAllFiles.setText("All Files");
-    panel4.add(checkBoxAllFiles, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
-    final JPanel panel5 = new JPanel();
-    panel5.setLayout(new GridLayoutManager(1, 2, new Insets(0, 0, 0, 0), -1, -1));
-    panelLang.add(panel5, new GridConstraints(8, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
-    final Spacer spacer3 = new Spacer();
-    panel5.add(spacer3, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
+    panel5.add(checkBoxAllFiles, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    final JPanel panel6 = new JPanel();
+    panel6.setLayout(new GridLayoutManager(1, 2, new Insets(0, 0, 0, 0), -1, -1));
+    panelLang.add(panel6, new GridConstraints(8, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
+    final Spacer spacer4 = new Spacer();
+    panel6.add(spacer4, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
     buttonUpdated = new JButton();
     buttonUpdated.setText("Select Updated");
-    panel5.add(buttonUpdated, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    panel6.add(buttonUpdated, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final JLabel label13 = new JLabel();
     label13.setText("Reference");
     panelLang.add(label13, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
@@ -577,22 +629,22 @@ public class ResolveTranslationProblems extends JFrame {
     if (labelLangRefFont != null) labelLangRef.setFont(labelLangRefFont);
     labelLangRef.setText("file.rpy:456");
     panelLang.add(labelLangRef, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
-    final JPanel panel6 = new JPanel();
-    panel6.setLayout(new GridLayoutManager(1, 5, new Insets(0, 0, 0, 0), -1, -1));
-    contentPane.add(panel6, new GridConstraints(3, 0, 1, 3, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
+    final JPanel panel7 = new JPanel();
+    panel7.setLayout(new GridLayoutManager(1, 5, new Insets(0, 0, 0, 0), -1, -1));
+    contentPane.add(panel7, new GridConstraints(3, 0, 1, 3, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
     buttonCancel = new JButton();
     this.$$$loadButtonText$$$(buttonCancel, this.$$$getMessageFromBundle$$$("strings", "button.cancel"));
-    panel6.add(buttonCancel, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
-    final Spacer spacer4 = new Spacer();
-    panel6.add(spacer4, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
+    panel7.add(buttonCancel, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    final Spacer spacer5 = new Spacer();
+    panel7.add(spacer5, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
     buttonRescan = new JButton();
     buttonRescan.setText("Rescan");
-    panel6.add(buttonRescan, new GridConstraints(0, 2, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
-    final Spacer spacer5 = new Spacer();
-    panel6.add(spacer5, new GridConstraints(0, 3, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
+    panel7.add(buttonRescan, new GridConstraints(0, 2, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    final Spacer spacer6 = new Spacer();
+    panel7.add(spacer6, new GridConstraints(0, 3, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, 1, null, null, null, 0, false));
     buttonFinish = new JButton();
     this.$$$loadButtonText$$$(buttonFinish, this.$$$getMessageFromBundle$$$("strings", "button.finish"));
-    panel6.add(buttonFinish, new GridConstraints(0, 4, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    panel7.add(buttonFinish, new GridConstraints(0, 4, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
   }
 
   /**

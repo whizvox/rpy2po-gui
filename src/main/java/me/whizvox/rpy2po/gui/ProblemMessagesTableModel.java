@@ -9,10 +9,14 @@ import java.util.List;
 
 public class ProblemMessagesTableModel extends AbstractTableModel {
 
-  private final List<Object[]> values;
+  private List<Object[]> values;
+  private final List<Object[]> allValues;
+  private boolean showAll;
 
   public ProblemMessagesTableModel() {
-    this.values = new ArrayList<>();
+    allValues = new ArrayList<>();
+    values = allValues;
+    showAll = true;
   }
 
   @Override
@@ -52,8 +56,15 @@ public class ProblemMessagesTableModel extends AbstractTableModel {
     return (MessageKey) values.get(row)[1];
   }
 
+  public boolean isShowingAll() {
+    return showAll;
+  }
+
   public void markResolved(int row, boolean resolved) {
     values.get(row)[0] = resolved;
+    if (resolved && !showAll) {
+      values.remove(row);
+    }
   }
 
   public void markResolved(int row) {
@@ -65,16 +76,34 @@ public class ProblemMessagesTableModel extends AbstractTableModel {
   }
 
   public void clear() {
-    this.values.clear();
+    values.clear();
+    if (!showAll) {
+      allValues.clear();
+    }
   }
 
   public void addValue(boolean resolved, MessageKey key) {
-    values.add(new Object[] {resolved, key});
+    var value = new Object[] {resolved, key};
+    values.add(value);
+    if (!resolved && !showAll) {
+      allValues.add(value);
+    }
   }
 
   public void setValues(Iterable<Pair<Boolean, MessageKey>> values) {
     clear();
-    values.forEach(pair -> this.values.add(new Object[] {pair.left(), pair.right()}));
+    values.forEach(pair -> addValue(pair.left(), pair.right()));
+  }
+
+  public void toggleShowAll(boolean showAll) {
+    if (this.showAll != showAll) {
+      this.showAll = showAll;
+      if (showAll) {
+        values = allValues;
+      } else {
+        values = new ArrayList<>(allValues.stream().filter(pair -> !(boolean) pair[0]).toList());
+      }
+    }
   }
 
 }
