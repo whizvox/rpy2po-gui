@@ -6,17 +6,20 @@ import me.whizvox.rpy2po.core.Pair;
 import javax.swing.table.AbstractTableModel;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public class ProblemMessagesTableModel extends AbstractTableModel {
 
   private List<Object[]> values;
   private final List<Object[]> allValues;
   private boolean showAll;
+  private String filter;
 
   public ProblemMessagesTableModel() {
     allValues = new ArrayList<>();
     values = allValues;
     showAll = true;
+    filter = null;
   }
 
   @Override
@@ -95,14 +98,33 @@ public class ProblemMessagesTableModel extends AbstractTableModel {
     values.forEach(pair -> addValue(pair.left(), pair.right()));
   }
 
+  private void updateRows() {
+    if (showAll && filter == null) {
+      values = allValues;
+    } else {
+      String filterLc = filter == null ? null : filter.toLowerCase();
+      values = new ArrayList<>(allValues.stream().filter(pair -> {
+        boolean c1 = showAll || !(boolean) pair[0];
+        boolean c2 = filter == null || ((MessageKey) pair[1]).msgId().toLowerCase().contains(filterLc);
+        return c1 && c2;
+      }).toList());
+    }
+  }
+
   public void toggleShowAll(boolean showAll) {
     if (this.showAll != showAll) {
       this.showAll = showAll;
-      if (showAll) {
-        values = allValues;
-      } else {
-        values = new ArrayList<>(allValues.stream().filter(pair -> !(boolean) pair[0]).toList());
-      }
+      updateRows();
+    }
+  }
+
+  public void setFilter(String filter) {
+    if (filter.isBlank()) {
+      filter = null;
+    }
+    if (!Objects.equals(this.filter, filter)) {
+      this.filter = filter;
+      updateRows();
     }
   }
 
