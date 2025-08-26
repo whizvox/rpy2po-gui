@@ -512,9 +512,13 @@ public class ResolveTranslationProblems extends JFrame {
       MessageKey key = new MessageKey(msg);
       resolutions.put(key, new ProblemResolution(key, null, true));
     });
-    String file = "_" + languages.get(languageIndex) + ".po";
-    int answer = JOptionPane.showConfirmDialog(this, "Are you sure you wish to apply these updates to " + file + "?", "Question", JOptionPane.YES_NO_OPTION);
-    if (answer == JOptionPane.YES_OPTION) {
+    String file = languages.get(languageIndex) + ".po";
+    String[] options = {"Cancel", "Yes, Write to New File", "Yes, Overwrite " + file};
+    int answer = JOptionPane.showOptionDialog(this, "Are you sure you want to apply these updates?", "Question", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+    if (answer != 0) {
+      if (answer == 1) {
+        file = languages.get(languageIndex) + "-" + StringUtil.randomChars(6) + ".po";
+      }
       List<Message> resultMessages = new ArrayList<>();
       template.forEach(msg -> {
         Message newMsg = new Message();

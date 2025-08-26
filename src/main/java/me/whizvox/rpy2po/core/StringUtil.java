@@ -45,4 +45,14 @@ public class StringUtil {
     return str == null || str.isBlank() ? def : str;
   }
 
+  private static final char[] RANDOM_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz".toCharArray();
+
+  public static String randomChars(int length) {
+    StringBuilder sb = new StringBuilder(length);
+    for (int i = 0; i < length; i++) {
+      sb.append(RANDOM_CHARS[(int) (Math.random() * RANDOM_CHARS.length)]);
+    }
+    return sb.toString();
+  }
+
 }
