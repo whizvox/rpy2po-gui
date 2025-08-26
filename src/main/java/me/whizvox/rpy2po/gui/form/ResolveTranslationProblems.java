@@ -61,6 +61,7 @@ public class ResolveTranslationProblems extends JFrame {
   private JCheckBox checkBoxShowAllProblems;
   private JTextField textFieldFilter;
   private JButton buttonShowUnresolved;
+  private JComboBox<String> comboBoxLang;
 
   private final ProblemMessagesTableModel problemStringsModel;
   private final SimilarStringsTableModel similarStringsModel;
@@ -97,6 +98,14 @@ public class ResolveTranslationProblems extends JFrame {
     template = new Catalog();
     translations = new Catalog();
 
+    languages.forEach(comboBoxLang::addItem);
+    comboBoxLang.addActionListener(e -> {
+      int answer = JOptionPane.showConfirmDialog(this, "Are you sure you want to switch languages?", "Question", JOptionPane.YES_NO_OPTION);
+      if (answer == JOptionPane.YES_OPTION) {
+        languageIndex = comboBoxLang.getSelectedIndex();
+        initialize();
+      }
+    });
     comboBoxTplFiles.addItemListener(e -> setCurrentFile((String) e.getItem()));
     buttonSelectFiles.addActionListener(e -> {
       var newFiles = SearchFilesDialog.prompt(this, langFiles, searchingFiles.getOrDefault(currentFile, List.of()));
@@ -144,6 +153,18 @@ public class ResolveTranslationProblems extends JFrame {
     buttonFinish.addActionListener(e -> finish());
 
     setContentPane(contentPane);
+
+    Path tplPath = profile.getBaseDirectory().resolve(profile.getPrimaryLanguage() + ".pot");
+    try {
+      template = new PoParser().parseCatalog(tplPath.toFile());
+    } catch (IOException e) {
+      LOGGER.error("Could not parse template file: {}", tplPath, e);
+      GuiUtils.showErrorMessage(this, "Could not parse template file.", e);
+      RPY2PO.inst().setFrame(() -> new ProfileActions(profile), profile.getName(), null);
+      return;
+    }
+    ((TitledBorder) panelTemplate.getBorder()).setTitle(tplPath.getFileName().toString());
+
     initialize();
     onProblemStringSelected(-1);
   }
@@ -160,7 +181,7 @@ public class ResolveTranslationProblems extends JFrame {
     return translations.stream()
         .filter(msg -> {
           MessageKey key = new MessageKey(msg);
-          return !resolutions.containsKey(key) && (obsolete == obsoleteStrings.contains(key));
+          return !template.contains(key) && !resolutionsReverse.containsKey(key) && (obsolete == obsoleteStrings.contains(key));
         })
         .toList();
   }
@@ -175,9 +196,7 @@ public class ResolveTranslationProblems extends JFrame {
 
   private void initialize() {
     try {
-      Path tplPath = profile.getBaseDirectory().resolve(profile.getPrimaryLanguage() + ".pot");
       Path langPath = profile.getBaseDirectory().resolve(languages.get(languageIndex) + ".po");
-      template = new PoParser().parseCatalog(tplPath.toFile());
       translations = new PoParser().parseCatalog(langPath.toFile());
       problemStrings.clear();
       tplFiles.clear();
@@ -205,7 +224,6 @@ public class ResolveTranslationProblems extends JFrame {
         }
       });
       setCurrentFile(currentFile);
-      ((TitledBorder) panelTemplate.getBorder()).setTitle(tplPath.getFileName().toString());
       ((TitledBorder) panelLang.getBorder()).setTitle(langPath.getFileName().toString());
       searchingFiles.clear();
       if (langFiles.contains(currentFile)) {
@@ -218,6 +236,7 @@ public class ResolveTranslationProblems extends JFrame {
   }
 
   private void setCurrentFile(String file) {
+    textFieldFilter.setText("");
     currentFile = file;
     problemStringsModel.clear();
     problemStrings.keySet().stream()
@@ -259,8 +278,8 @@ public class ResolveTranslationProblems extends JFrame {
       MessageKey key = problemStringsModel.getKey(row);
       Message msg = template.get(key);
       labelTplRef.setText(String.join(", ", msg.getSourceReferences()));
-      labelTplContext.setText(key.msgContext());
-      labelTplComment.setText(String.join(", ", msg.getExtractedComments()));
+      labelTplContext.setText(StringUtil.notNullOrBlankOrElse(key.msgContext(), " "));
+      labelTplComment.setText(StringUtil.notNullOrBlankOrElse(String.join(", ", msg.getExtractedComments()), ""));
       textAreaTplString.setText(key.msgId());
       similarStringsModel.setValues(problemStrings.computeIfAbsent(key, k -> new ArrayList<>()));
       similarStringsModel.fireTableDataChanged();
@@ -325,7 +344,14 @@ public class ResolveTranslationProblems extends JFrame {
             return;
           }
         }
-        ProblemResolution resolution = new ProblemResolution(tplKey, langKey, langMsg.getMsgstr(), false);
+        for (int row = 0; row < problemStringsModel.getRowCount(); row++) {
+          if (row != problemRow && !problemStringsModel.isResolved(row)) {
+            MessageKey otherKey = problemStringsModel.getKey(row);
+            List<SimilarMessage> similarMessages = problemStrings.get(otherKey);
+            similarMessages.removeIf(similarMsg -> similarMsg.key().equals(langKey));
+          }
+        }
+        ProblemResolution resolution = new ProblemResolution(tplKey, langKey, false);
         resolutions.put(tplKey, resolution);
         resolutionsReverse.put(langKey, resolution);
         problemStringsModel.markResolved(problemRow);
@@ -359,12 +385,12 @@ public class ResolveTranslationProblems extends JFrame {
             List<SimilarMessage> similar = findSimilarStrings(key, 0.7F, null, false);
             if (similar.size() == 1) {
               SimilarMessage msg = similar.getFirst();
-              ProblemResolution resolution = new ProblemResolution(key, msg.key(), msg.key().msgId(), false);
+              ProblemResolution resolution = new ProblemResolution(key, msg.key(), false);
               resolutions.put(key, resolution);
               resolutionsReverse.put(msg.key(), resolution);
               rows.add(row);
             } else if (similar.isEmpty()) {
-              ProblemResolution resolution = new ProblemResolution(key, null, null, true);
+              ProblemResolution resolution = new ProblemResolution(key, null, true);
               resolutions.put(key, resolution);
               rows.add(row);
             }
@@ -385,7 +411,7 @@ public class ResolveTranslationProblems extends JFrame {
     for (int row = 0; row < problemStringsModel.getRowCount(); row++) {
       if (!problemStringsModel.isResolved(row)) {
         MessageKey key = problemStringsModel.getKey(row);
-        resolutions.put(key, new ProblemResolution(key, null, null, true));
+        resolutions.put(key, new ProblemResolution(key, null, true));
         problemStringsModel.markResolved(row);
       }
     }
@@ -402,8 +428,8 @@ public class ResolveTranslationProblems extends JFrame {
       MessageKey key = similarStringsModel.getKey(row);
       Message msg = translations.get(key);
       labelLangRef.setText(String.join(", ", msg.getSourceReferences()));
-      labelLangContext.setText(key.msgContext());
-      labelLangComment.setText(String.join(", ", msg.getExtractedComments()));
+      labelLangContext.setText(StringUtil.notNullOrBlankOrElse(key.msgContext(), " "));
+      labelLangComment.setText(StringUtil.notNullOrBlankOrElse(String.join(", ", msg.getExtractedComments()), " "));
       textAreaLangString.setText(key.msgId());
     }
   }
@@ -455,11 +481,14 @@ public class ResolveTranslationProblems extends JFrame {
   }
 
   private void finish() {
-    List<MessageKey> unaccounted = translations.stream()
-        .map(MessageKey::new)
-        .filter(key -> !resolutionsReverse.containsKey(key) && !obsoleteStrings.contains(key))
-        .toList();
-    if (!unaccounted.isEmpty()) {
+    long unaccountedCount = translations.stream()
+        .filter(msg -> {
+          MessageKey key = new MessageKey(msg);
+          return !template.contains(key) && !resolutionsReverse.containsKey(key) && !obsoleteStrings.contains(key);
+        })
+        .count();
+    if (unaccountedCount > 0) {
+      JOptionPane.showMessageDialog(this, "Found %d unaccounted for string(s).".formatted(unaccountedCount));
       ObsoleteStringsDialog.show(this);
       return;
     }
@@ -476,12 +505,12 @@ public class ResolveTranslationProblems extends JFrame {
     }
     unresolved.forEach(msg -> {
       MessageKey key = new MessageKey(msg);
-      resolutions.put(key, new ProblemResolution(key, null, null, true));
+      resolutions.put(key, new ProblemResolution(key, null, true));
     });
     String file = "_" + languages.get(languageIndex) + ".po";
     int answer = JOptionPane.showConfirmDialog(this, "Are you sure you wish to apply these updates to " + file + "?", "Question", JOptionPane.YES_NO_OPTION);
     if (answer == JOptionPane.YES_OPTION) {
-      Catalog result = new Catalog();
+      List<Message> resultMessages = new ArrayList<>();
       template.forEach(msg -> {
         Message newMsg = new Message();
         newMsg.getSourceReferences().addAll(msg.getSourceReferences());
@@ -491,9 +520,14 @@ public class ResolveTranslationProblems extends JFrame {
         MessageKey key = new MessageKey(newMsg);
         ProblemResolution resolution = resolutions.get(key);
         if (resolution == null || resolution.markNew()) {
-          result.add(newMsg);
-        } else if (resolution.updateMsgstr() != null) {
-          newMsg.setMsgstr(resolution.updateMsgstr());
+          resultMessages.add(newMsg);
+        } else if (resolution.langKey() != null) {
+          Message langMsg = translations.get(resolution.langKey());
+          newMsg.setMsgstr(langMsg.getMsgstr());
+          if (!langMsg.getMsgId().equals(msg.getMsgId())) {
+            newMsg.setPrevMsgid(langMsg.getMsgId());
+          }
+          resultMessages.add(newMsg);
         } else {
           LOGGER.warn("Invalid resolution: {}", resolution);
         }
@@ -508,11 +542,13 @@ public class ResolveTranslationProblems extends JFrame {
           newMsg.setMsgId(msg.getMsgId());
           newMsg.setMsgstr(msg.getMsgstr());
           newMsg.markObsolete();
-          result.add(newMsg);
+          resultMessages.add(newMsg);
         }
       });
       Path path = profile.getBaseDirectory().resolve("_" + file);
       try {
+        Catalog result = new Catalog();
+        resultMessages.sort(new MessageSourceReferenceComparator());
         new PoWriter().write(result, path.toFile());
       } catch (IOException e) {
         LOGGER.error("Could not write file: {}", path.getFileName(), e);
@@ -537,26 +573,26 @@ public class ResolveTranslationProblems extends JFrame {
    */
   private void $$$setupUI$$$() {
     contentPane = new JPanel();
-    contentPane.setLayout(new GridLayoutManager(4, 3, new Insets(10, 10, 10, 10), -1, -1));
+    contentPane.setLayout(new GridLayoutManager(5, 3, new Insets(10, 10, 10, 10), -1, -1));
     final JLabel label1 = new JLabel();
     label1.setText("Current File");
-    contentPane.add(label1, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    contentPane.add(label1, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     comboBoxTplFiles = new JComboBox();
-    contentPane.add(comboBoxTplFiles, new GridConstraints(0, 1, 1, 2, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    contentPane.add(comboBoxTplFiles, new GridConstraints(1, 1, 1, 2, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final JLabel label2 = new JLabel();
     label2.setText("Search File(s)");
-    contentPane.add(label2, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    contentPane.add(label2, new GridConstraints(2, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     labelFiles = new JLabel();
     Font labelFilesFont = this.$$$getFont$$$(null, Font.PLAIN, -1, labelFiles.getFont());
     if (labelFilesFont != null) labelFiles.setFont(labelFilesFont);
     labelFiles.setText("definitions.rpy");
-    contentPane.add(labelFiles, new GridConstraints(1, 1, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    contentPane.add(labelFiles, new GridConstraints(2, 1, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     buttonSelectFiles = new JButton();
     buttonSelectFiles.setText("Select...");
-    contentPane.add(buttonSelectFiles, new GridConstraints(1, 2, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_NONE, 1, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    contentPane.add(buttonSelectFiles, new GridConstraints(2, 2, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_NONE, 1, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final JPanel panel1 = new JPanel();
     panel1.setLayout(new GridLayoutManager(1, 2, new Insets(0, 0, 0, 0), -1, -1));
-    contentPane.add(panel1, new GridConstraints(2, 0, 1, 3, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
+    contentPane.add(panel1, new GridConstraints(3, 0, 1, 3, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
     panelTemplate = new JPanel();
     panelTemplate.setLayout(new GridLayoutManager(14, 1, new Insets(5, 5, 5, 5), -1, -1));
     panel1.add(panelTemplate, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
@@ -719,7 +755,7 @@ public class ResolveTranslationProblems extends JFrame {
     panelLang.add(labelLangRef, new GridConstraints(1, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     final JPanel panel8 = new JPanel();
     panel8.setLayout(new GridLayoutManager(1, 6, new Insets(5, 0, 0, 0), -1, -1));
-    contentPane.add(panel8, new GridConstraints(3, 0, 1, 3, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
+    contentPane.add(panel8, new GridConstraints(4, 0, 1, 3, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, null, null, 0, false));
     buttonCancel = new JButton();
     this.$$$loadButtonText$$$(buttonCancel, this.$$$getMessageFromBundle$$$("strings", "button.cancel"));
     panel8.add(buttonCancel, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
@@ -736,6 +772,13 @@ public class ResolveTranslationProblems extends JFrame {
     buttonShowUnresolved = new JButton();
     buttonShowUnresolved.setText("Show Unresolved Strings");
     panel8.add(buttonShowUnresolved, new GridConstraints(0, 3, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    final JLabel label15 = new JLabel();
+    label15.setText("Language");
+    contentPane.add(label15, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    comboBoxLang = new JComboBox();
+    Font comboBoxLangFont = this.$$$getFont$$$("Consolas", Font.PLAIN, -1, comboBoxLang.getFont());
+    if (comboBoxLangFont != null) comboBoxLang.setFont(comboBoxLangFont);
+    contentPane.add(comboBoxLang, new GridConstraints(0, 1, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(100, -1), null, 0, false));
   }
 
   /**

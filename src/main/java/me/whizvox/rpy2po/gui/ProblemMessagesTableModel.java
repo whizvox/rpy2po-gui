@@ -87,9 +87,13 @@ public class ProblemMessagesTableModel extends AbstractTableModel {
 
   public void addValue(boolean resolved, MessageKey key) {
     var value = new Object[] {resolved, key};
-    values.add(value);
-    if (!resolved && !showAll) {
+    if (showAll) {
+      values.add(value);
+    } else {
       allValues.add(value);
+      if (!resolved) {
+        values.add(value);
+      }
     }
   }
 

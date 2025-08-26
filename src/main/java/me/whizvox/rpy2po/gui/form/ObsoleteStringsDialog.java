@@ -84,7 +84,7 @@ public class ObsoleteStringsDialog extends JDialog {
   public static void show(ResolveTranslationProblems owner) {
     ObsoleteStringsDialog dialog = new ObsoleteStringsDialog(owner);
     dialog.pack();
-    dialog.setLocationRelativeTo(null);
+    dialog.setLocationRelativeTo(owner);
     dialog.show();
   }
 

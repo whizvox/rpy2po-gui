@@ -4,6 +4,5 @@ import com.soberlemur.potentilla.MessageKey;
 
 public record ProblemResolution(MessageKey templateKey,
                                 MessageKey langKey,
-                                String updateMsgstr,
                                 boolean markNew) {
 }

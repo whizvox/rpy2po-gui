@@ -41,4 +41,8 @@ public class StringUtil {
     return costs[b.length()];
   }
 
+  public static String notNullOrBlankOrElse(String str, String def) {
+    return str == null || str.isBlank() ? def : str;
+  }
+
 }
