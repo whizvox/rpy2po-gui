@@ -106,6 +106,7 @@ public class TranslationFile implements Iterable<TranslationEntry> {
           writer.write("    new \"" + entry.translatedText() + "\"");
           writer.newLine();
         }
+        writer.newLine();
       }
     }
   }

@@ -55,4 +55,18 @@ public class StringUtil {
     return sb.toString();
   }
 
+  public static String escape(String str) {
+    StringBuilder sb = new StringBuilder();
+    for (char c : str.toCharArray()) {
+      switch (c) {
+        case '\\':
+        case '\"':
+          sb.append('\\');
+        default:
+          sb.append(c);
+      }
+    }
+    return sb.toString();
+  }
+
 }

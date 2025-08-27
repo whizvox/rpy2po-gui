@@ -9,4 +9,8 @@ public class GuiUtils {
     JOptionPane.showMessageDialog(parent, msg + "\n" + e.getClass() + ": " + e.getMessage(), "Error!", JOptionPane.ERROR_MESSAGE);
   }
 
+  public static int askYesNoOption(Component parent, String msg) {
+    return JOptionPane.showConfirmDialog(parent, msg, "Question", JOptionPane.YES_NO_OPTION);
+  }
+
 }

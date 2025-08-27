@@ -1,6 +1,8 @@
 package me.whizvox.rpy2po.rpytl;
 
 import com.soberlemur.potentilla.Message;
+import me.whizvox.rpy2po.core.StringUtil;
+import me.whizvox.rpy2po.gettext.SourceReference;
 
 import java.util.Collections;
 import java.util.Map;
@@ -24,30 +26,27 @@ public record DialogueFormats(Map<String, String> formats) {
   }
 
   public TranslationEntry format(Message msg, String language) {
-    String ref = msg.getSourceReferences().getFirst();
-    int index = ref.indexOf(':');
-    String file = ref.substring(0, index);
-    int line = Integer.parseInt(ref.substring(index + 1));
+    SourceReference ref = SourceReference.parse(msg.getSourceReferences().getFirst());
     if (msg.getMsgContext() == null) {
-      return new TranslationEntry(null, language, msg.getMsgId(), msg.getMsgstr(), file, line);
+      return new TranslationEntry(null, language, msg.getMsgId(), msg.getMsgstr(), ref.file(), ref.line());
     }
     String format = formats.get(msg.getMsgContext());
     if (format == null) {
       throw new IllegalArgumentException("Invalid message, msgctxt does not correlate to any formats");
     }
     String original = doFormat(format, msg.getMsgId());
-    String translated = doFormat(format, msg.getMsgContext());
-    return new TranslationEntry(msg.getMsgContext(), language, original, translated, file, line);
+    String translated = doFormat(format, msg.getMsgstr());
+    return new TranslationEntry(msg.getMsgContext(), language, original, translated, ref.file(), ref.line());
   }
 
   private static String doFormat(String format, String msg) {
     int index = msg.indexOf("::");
     if (index > 0) {
-      String who = msg.substring(0, index).trim();
-      String what = msg.substring(index + 1).trim();
+      String who = StringUtil.escape(msg.substring(0, index).trim());
+      String what = StringUtil.escape(msg.substring(index + 2).trim());
       return format.replace("[who]", who).replace("[what]", what);
     }
-    return format.replace("[what]", msg);
+    return format.replace("[what]", StringUtil.escape(msg));
   }
 
 }
