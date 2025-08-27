@@ -7,7 +7,7 @@ public record TranslationEntry(String id,
                                String file,
                                int line) {
 
-  public boolean isDialogue() {
+  public boolean isStatement() {
     return id != null;
   }
 

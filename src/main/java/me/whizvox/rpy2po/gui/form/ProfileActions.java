@@ -151,16 +151,19 @@ public class ProfileActions extends JFrame {
       if (!result.mismatchedFormats().isEmpty()) {
         LOGGER.info("Found {} mismatched formats: {}", result.mismatchedFormats().size(), result.mismatchedFormats());
       }
-      Path formatsFile = profile.getBaseDirectory().resolve("formats." + profile.getPrimaryLanguage() + ".json");
-      LOGGER.info("Saving formats file {}", formatsFile);
-      RPY2PO.inst().writeJson(formatsFile, result.formats());
+      Path formatsPath = profile.getBaseDirectory().resolve("formats." + profile.getPrimaryLanguage() + ".json");
+      LOGGER.info("Saving formats file {}", formatsPath);
+      RPY2PO.inst().writeJson(formatsPath, result.formats());
+      Path statementsPath = profile.getBaseDirectory().resolve("statements.json");
+      LOGGER.info("Saving statements file {}", statementsPath);
+      RPY2PO.inst().writeJson(statementsPath, result.statements());
       Path tempFile = profile.getBaseDirectory().resolve(profile.getPrimaryLanguage() + ".pot");
       PoWriter poWriter = new PoWriter();
       try (OutputStream out = Files.newOutputStream(tempFile)) {
         LOGGER.info("Writing catalog file {}", tempFile);
         poWriter.write(result.catalog(), out);
       }
-      JOptionPane.showMessageDialog(this, "Successfully generated template file (" + tempFile.getFileName().toString() + ") and formats file (" + formatsFile.getFileName().toString() + ")");
+      JOptionPane.showMessageDialog(this, "Successfully generated " + tempFile.getFileName() + ", " + formatsPath.getFileName() + ", and " + statementsPath.getFileName());
     } catch (IOException e) {
       LOGGER.error("Could not generate template for profile {} ({})", profile.getName(), profile.getBaseDirectory(), e);
       JOptionPane.showMessageDialog(this, "Could not generate template\n" + e.getClass() + ": " + e.getMessage(), "Error!", JOptionPane.ERROR_MESSAGE);
@@ -253,6 +256,15 @@ public class ProfileActions extends JFrame {
       GuiUtils.showErrorMessage(this, "Could not read formats file.", e);
       return;
     }
+    Statements statements;
+    Path stmtsPath = profile.getBaseDirectory().resolve("statements.json");
+    try {
+      statements = RPY2PO.inst().getMapper().readValue(stmtsPath.toFile(), Statements.class);
+    } catch (IOException e) {
+      LOGGER.error("Could not read statements file at {}", stmtsPath);
+      GuiUtils.showErrorMessage(this, "Could not read statements file.", e);
+      return;
+    }
     langs.forEach(lang -> {
       Path poPath = profile.getBaseDirectory().resolve(lang + ".po");
       if (!Files.exists(poPath)) {
@@ -282,7 +294,7 @@ public class ProfileActions extends JFrame {
           }
         }
       }
-      PO2RPYConverter converter = new PO2RPYConverter(lang, poPath, formats);
+      PO2RPYConverter converter = new PO2RPYConverter(lang, poPath, formats, statements);
       try {
         Map<String, TranslationFile> files = converter.convert();
         Map<String, Exception> exceptions = converter.write(files, tlDir);

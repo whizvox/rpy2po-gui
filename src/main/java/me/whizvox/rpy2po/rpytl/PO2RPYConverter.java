@@ -14,7 +14,8 @@ import java.util.Map;
 
 public record PO2RPYConverter(String language,
                               Path input,
-                              DialogueFormats formats) {
+                              DialogueFormats formats,
+                              Statements statements) {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(PO2RPYConverter.class);
 
@@ -32,6 +33,10 @@ public record PO2RPYConverter(String language,
         }
       }
     });
+    statements.statements().values().forEach(stmt -> {
+      files.get(stmt.file()).add(new TranslationEntry(stmt.id(), language, stmt.statement(), stmt.statement(), stmt.file(), stmt.line()));
+    });
+    files.values().forEach(TranslationFile::sort);
     return files;
   }
 

@@ -1,8 +1,5 @@
 package me.whizvox.rpy2po.rpytl;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,7 +28,9 @@ public record Dialogue(String who,
                        String what,
                        String format) {
 
-
+  public boolean isPlainStatement() {
+    return what == null;
+  }
 
   // some additional properties that can be applied to Ren'Py dialogue statements
   // - nointeract: Only appears when Ren'Py generates translations for dialogue that appears during dialogue menus
@@ -43,8 +42,6 @@ public record Dialogue(String who,
       PATTERN_NAME_ONLY = Pattern.compile("^\"(.+)\" \"(.*)\"" + OPTIONALS + "$", Pattern.MULTILINE),
       PATTERN_CHARACTER = Pattern.compile("^(.+) \"(.*)\"" + OPTIONALS + "$", Pattern.MULTILINE),
       PATTERN_NARRATION = Pattern.compile("^\"(.*)\"" + OPTIONALS + "$", Pattern.MULTILINE);
-
-  private static final Logger LOGGER = LoggerFactory.getLogger(Dialogue.class);
 
   /**
    * Parse a line of Ren'Py dialogue code (i.e. <code>obi "Hello, there."</code>)

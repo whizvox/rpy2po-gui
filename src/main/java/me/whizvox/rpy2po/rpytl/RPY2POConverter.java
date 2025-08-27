@@ -50,6 +50,7 @@ public record RPY2POConverter(String language,
   public Result convert() throws IOException {
     Catalog catalog = new Catalog();
     Map<String, String> formats = new HashMap<>();
+    Map<String, Statement> statements = new HashMap<>();
     List<String> mismatchedFormats = new ArrayList<>();
     List<String> missingNames = new ArrayList<>();
     TranslationContext ctx = new TranslationContext(names);
@@ -65,7 +66,7 @@ public record RPY2POConverter(String language,
           Message msg = new Message();
           msg.addSourceReference(entry.file(), entry.line());
           List<String> comments;
-          if (entry.isDialogue()) {
+          if (entry.isStatement()) {
             msg.setMsgContext(entry.id());
             Dialogue origDialogue = entry.parseOriginalDialogue();
             Dialogue tlDialogue = entry.parseTranslatedDialogue();
@@ -83,7 +84,11 @@ public record RPY2POConverter(String language,
               }
             }
             if (validateFormats == null) {
-              formats.put(entry.id(), origDialogue.format());
+              if (origDialogue.isPlainStatement()) {
+                statements.put(entry.id(), new Statement(entry.id(), origDialogue.format(), entry.file(), entry.line()));
+              } else {
+                formats.put(entry.id(), origDialogue.format());
+              }
             } else if (!validateFormats.matches(entry.id(), origDialogue.format()) || !validateFormats.matches(entry.id(), tlDialogue.format())) {
               mismatchedFormats.add(entry.id());
             }
@@ -105,7 +110,7 @@ public record RPY2POConverter(String language,
         }
       }
     }
-    return new Result(catalog, new DialogueFormats(formats), mismatchedFormats, missingNames);
+    return new Result(catalog, new DialogueFormats(formats), new Statements(statements), mismatchedFormats, missingNames);
   }
 
   /**
@@ -113,6 +118,8 @@ public record RPY2POConverter(String language,
    * @param catalog The representation of the <code>.po/.pot</code> file
    * @param formats All dialogue formats found while reading the Ren'Py translation entries, unless
    *                {@link #validateFormats()} is <code>null</code>, in which case, this will contain no formats.
+   * @param statements All plain statements found in the Ren'Py file that could not be parsed as dialogue (usually
+   *                   <code>nvl clear</code>)
    * @param mismatchedFormats The IDs ({@link TranslationEntry#id()}) of all entries that did not match the format found
    *                          in {@link #validateFormats()}. However, if {@link #validateFormats()} is
    *                          <code>null</code>, this will be empty.
@@ -120,6 +127,7 @@ public record RPY2POConverter(String language,
    */
   public record Result(Catalog catalog,
                        DialogueFormats formats,
+                       Statements statements,
                        List<String> mismatchedFormats,
                        List<String> missingNames) {
   }

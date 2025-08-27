@@ -4,10 +4,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -75,7 +72,7 @@ public class TranslationFile implements Iterable<TranslationEntry> {
       }
       String stringsLang = null;
       for (TranslationEntry entry : this) {
-        if (entry.isDialogue()) {
+        if (entry.isStatement()) {
           if (stringsLang != null) {
             stringsLang = null;
           }
@@ -109,6 +106,10 @@ public class TranslationFile implements Iterable<TranslationEntry> {
         writer.newLine();
       }
     }
+  }
+
+  public void sort() {
+    entries.sort((o1, o2) -> Comparator.comparing(TranslationEntry::file).thenComparing(TranslationEntry::line).compare(o1, o2));
   }
 
   public void add(TranslationEntry entry) {
