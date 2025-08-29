@@ -1,6 +1,6 @@
 package me.whizvox.rpy2po.core;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIncludeProperties;
 import me.whizvox.rpy2po.rpytl.CharacterNames;
 
 import java.nio.file.Path;
@@ -9,6 +9,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+@JsonIncludeProperties({"name", "renPyProjectDirectory", "primaryLanguage", "outputLanguages", "names", "includedFiles",
+    "excludedFiles", "lastOpened"})
 public class Profile {
 
   private Path baseDirectory;
@@ -113,9 +115,28 @@ public class Profile {
     this.lastOpened = lastOpened;
   }
 
-  @JsonIgnore
   public Path getFile() {
     return baseDirectory.resolve("profile.json");
+  }
+
+  public Path getStatementsFile() {
+    return baseDirectory.resolve("statements.json");
+  }
+
+  public Path getTemplateFile() {
+    return baseDirectory.resolve(primaryLanguage + ".pot");
+  }
+
+  public Path getLanguageFile(String lang) {
+    return baseDirectory.resolve("lang/" + lang + ".po").normalize();
+  }
+
+  public Path getStagingDirectory() {
+    return baseDirectory.resolve("stage");
+  }
+
+  public Path getStagingDirectory(String lang) {
+    return getStagingDirectory().resolve(lang);
   }
 
   public Path getTranslationDirectory(String language) {
@@ -126,47 +147,5 @@ public class Profile {
     Path tlDir = getTranslationDirectory(language);
     return includedFiles.stream().map(tlDir::resolve).toList();
   }
-
-  /*public static final JsonSerializer<Profile> SERIALIZER = new JsonSerializer<>() {
-    @Override
-    public void serialize(Profile profile, JsonGenerator gen, SerializerProvider serializers) throws IOException {
-      gen.writeStartObject();
-      {
-        gen.writeStringField("name", profile.name);
-        gen.writeStringField("baseDir", profile.baseDir.toAbsolutePath().normalize().toString());
-        gen.writeStringField("renPyProjectDir", profile.renPyProjectDir.toAbsolutePath().normalize().toString());
-        gen.writeStringField("primaryLang", profile.primaryLang);
-        gen.writeFieldName("outputLangs");
-        gen.writeArray(profile.outputLangs.toArray(String[]::new), 0, profile.outputLangs.size());
-        gen.writeObjectField("names", profile.names);
-        gen.writeFieldName("includedFiles");
-        gen.writeArray(profile.includedFiles.toArray(String[]::new), 0, profile.includedFiles.size());
-        gen.writeFieldName("excludedFiles");
-        gen.writeArray(profile.excludedFiles.toArray(String[]::new), 0, profile.excludedFiles.size());
-        gen.writeNumberField("lastOpened", profile.lastOpened.toEpochSecond(ZoneOffset.UTC));
-      }
-      gen.writeEndObject();
-    }
-  };
-
-  public static final JsonDeserializer<Profile> DESERIALIZER = new JsonDeserializer<>() {
-    @Override
-    public Profile deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
-      JsonNode n = p.getCodec().readTree(p);
-      String name = n.get("name").asText();
-      String baseDir = n.get("baseDir").asText();
-      String renPyProjectDir = n.get("renPyProjectDir").asText();
-      String primaryLang = n.get("primaryLang").asText();
-      ArrayNode outputLangsNode = (ArrayNode) n.get("outputLangs");
-      List<String> outputLangs = new ArrayList<>();
-      for (JsonNode langNode : outputLangsNode) {
-        outputLangs.add(langNode.asText());
-      }
-      ObjectNode namesNode = (ObjectNode) n.get("names");
-      CharacterNames names = namesNode.traverse().readValueAsTree();
-      long lastOpenedSeconds = n.get("lastOpened").asLong();
-      return new Profile(Paths.get(baseDir), name, Paths.get(renPyProjectDir), primaryLang, outputLangs, LocalDateTime.ofEpochSecond(lastOpenedSeconds, 0, ZoneOffset.UTC));
-    }
-  };*/
 
 }

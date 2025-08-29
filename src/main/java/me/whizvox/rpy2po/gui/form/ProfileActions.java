@@ -17,7 +17,6 @@ import org.slf4j.LoggerFactory;
 import javax.swing.*;
 import java.awt.*;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -151,9 +150,6 @@ public class ProfileActions extends JFrame {
       if (!result.mismatchedFormats().isEmpty()) {
         LOGGER.info("Found {} mismatched formats: {}", result.mismatchedFormats().size(), result.mismatchedFormats());
       }
-      Path formatsPath = profile.getBaseDirectory().resolve("formats." + profile.getPrimaryLanguage() + ".json");
-      LOGGER.info("Saving formats file {}", formatsPath);
-      RPY2PO.inst().writeJson(formatsPath, result.formats());
       Path statementsPath = profile.getBaseDirectory().resolve("statements.json");
       LOGGER.info("Saving statements file {}", statementsPath);
       RPY2PO.inst().writeJson(statementsPath, result.statements());
@@ -163,7 +159,7 @@ public class ProfileActions extends JFrame {
         LOGGER.info("Writing catalog file {}", tempFile);
         poWriter.write(result.catalog(), out);
       }
-      JOptionPane.showMessageDialog(this, "Successfully generated " + tempFile.getFileName() + ", " + formatsPath.getFileName() + ", and " + statementsPath.getFileName());
+      JOptionPane.showMessageDialog(this, "Successfully generated " + tempFile.getFileName() + " and " + statementsPath.getFileName() + ".");
     } catch (IOException e) {
       LOGGER.error("Could not generate template for profile {} ({})", profile.getName(), profile.getBaseDirectory(), e);
       JOptionPane.showMessageDialog(this, "Could not generate template\n" + e.getClass() + ": " + e.getMessage(), "Error!", JOptionPane.ERROR_MESSAGE);
@@ -247,15 +243,6 @@ public class ProfileActions extends JFrame {
     } else {
       return;
     }
-    Path formatsPath = profile.getBaseDirectory().resolve("formats." + profile.getPrimaryLanguage() + ".json");
-    DialogueFormats formats;
-    try (InputStream in = Files.newInputStream(formatsPath)) {
-      formats = RPY2PO.inst().getMapper().readValue(in, DialogueFormats.class);
-    } catch (IOException e) {
-      LOGGER.error("Could not read formats file at {}", formatsPath);
-      GuiUtils.showErrorMessage(this, "Could not read formats file.", e);
-      return;
-    }
     Statements statements;
     Path stmtsPath = profile.getBaseDirectory().resolve("statements.json");
     try {
@@ -294,7 +281,7 @@ public class ProfileActions extends JFrame {
           }
         }
       }
-      PO2RPYConverter converter = new PO2RPYConverter(lang, poPath, formats, statements);
+      PO2RPYConverter converter = new PO2RPYConverter(lang, poPath, statements);
       try {
         Map<String, TranslationFile> files = converter.convert();
         Map<String, Exception> exceptions = converter.write(files, tlDir);

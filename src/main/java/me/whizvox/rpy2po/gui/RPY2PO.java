@@ -10,10 +10,8 @@ import me.whizvox.rpy2po.core.json.SimplePathJsonDeserializer;
 import me.whizvox.rpy2po.core.json.SimplePathJsonSerializer;
 import me.whizvox.rpy2po.gui.form.SelectProfile;
 import me.whizvox.rpy2po.rpytl.CharacterNames;
-import me.whizvox.rpy2po.rpytl.DialogueFormats;
 import me.whizvox.rpy2po.rpytl.Statements;
 import me.whizvox.rpy2po.rpytl.json.CharacterNamesCodec;
-import me.whizvox.rpy2po.rpytl.json.DialogueFormatsCodec;
 import me.whizvox.rpy2po.rpytl.json.StatementsCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,8 +52,6 @@ public class RPY2PO {
     SimpleModule module = new SimpleModule();
     module.addSerializer(CharacterNames.class, CharacterNamesCodec.SERIALIZER);
     module.addDeserializer(CharacterNames.class, CharacterNamesCodec.DESERIALIZER);
-    module.addSerializer(DialogueFormats.class, DialogueFormatsCodec.SERIALIZER);
-    module.addDeserializer(DialogueFormats.class, DialogueFormatsCodec.DESERIALIZER);
     module.addSerializer(Statements.class, StatementsCodec.SERIALIZER);
     module.addDeserializer(Statements.class, StatementsCodec.DESERIALIZER);
     module.addSerializer(Path.class, new SimplePathJsonSerializer());
@@ -121,6 +117,7 @@ public class RPY2PO {
             Path profilePath = Paths.get(profilePathStr);
             try (InputStream in = Files.newInputStream(profilePath.resolve("profile.json"))) {
               Profile profile = mapper.readValue(in, Profile.class);
+              profile.setProfileDirectory(profilePath);
               LOGGER.debug("Successfully read profile at {}", profilePath);
               profiles.add(profile);
             }

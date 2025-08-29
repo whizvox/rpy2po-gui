@@ -18,39 +18,40 @@ import java.util.*;
  * @param inputs All input <code>.rpy</code> files that will be read from
  * @param names Character names that will appear as translator comments in the <code>.po</code> file messages. If
  *              <code>null</code>, then no such comments will be applied.
- * @param validateFormats Dialogue formats that will be used to validate against those found in the Ren'Py translation
- *                        entries. If <code>null</code>, then no validation occurs, and instead all formats will be
- *                        included in the final result of {@link #convert()}.
+ * @param validateStatements Statements that will be used to validate against those found in the Ren'Py translation entries. If
+ *                   <code>null</code>, then no validation occurs, and instead all statements will be included in the
+ *                   final result of {@link #convert()}.
  * @param commentGenerator A generator for adding translator comments to <code>.po</code> file entries.
  */
 public record RPY2POConverter(String language,
                               List<Path> inputs,
                               CharacterNames names,
-                              DialogueFormats validateFormats,
+                              Statements validateStatements,
                               CommentGenerator commentGenerator) {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(RPY2POConverter.class);
 
-  public RPY2POConverter(String language, List<Path> inputs, CharacterNames names, DialogueFormats validateFormats,
+  public RPY2POConverter(String language, List<Path> inputs, CharacterNames names, Statements validateStatements,
                          CommentGenerator commentGenerator) {
     this.language = language;
     this.inputs = Collections.unmodifiableList(inputs);
     this.names = names;
-    this.validateFormats = validateFormats;
+    this.validateStatements = validateStatements;
     this.commentGenerator = commentGenerator;
   }
 
   /**
    * Reads all <code>.rpy</code> input files and converts them into a single <code>.po</code> file via a {@link Catalog}
    * object. Will also track any missing character names if one doesn't exist in the {@link #names()} object.
-   * If {@link #validateFormats()} is not <code>null</code>, this will also track any dialogue formats that don't match.
+   * If {@link #validateStatements()} is not <code>null</code>, this will also track any dialogue formats that don't
+   * match.
    * @return The result of converting the files
    * @throws IOException If reading any of the input files fails
    */
   public Result convert() throws IOException {
     Catalog catalog = new Catalog();
-    Map<String, String> formats = new HashMap<>();
-    Map<String, Statement> statements = new HashMap<>();
+    Map<String, String> dialogue = new HashMap<>();
+    Map<String, Statement> plain = new HashMap<>();
     List<String> mismatchedFormats = new ArrayList<>();
     List<String> missingNames = new ArrayList<>();
     TranslationContext ctx = new TranslationContext(names);
@@ -83,13 +84,13 @@ public record RPY2POConverter(String language,
                 msg.setMsgstr(tlDialogue.what());
               }
             }
-            if (validateFormats == null) {
+            if (validateStatements == null) {
               if (origDialogue.isPlainStatement()) {
-                statements.put(entry.id(), new Statement(entry.id(), origDialogue.format(), entry.file(), entry.line()));
+                plain.put(entry.id(), new Statement(entry.id(), origDialogue.format(), entry.file(), entry.line()));
               } else {
-                formats.put(entry.id(), origDialogue.format());
+                dialogue.put(entry.id(), origDialogue.format());
               }
-            } else if (!validateFormats.matches(entry.id(), origDialogue.format()) || !validateFormats.matches(entry.id(), tlDialogue.format())) {
+            } else if (!validateStatements.matches(entry.id(), origDialogue.format()) || !validateStatements.matches(entry.id(), tlDialogue.format())) {
               mismatchedFormats.add(entry.id());
             }
             comments = commentGenerator.generate(entry, origDialogue, ctx);
@@ -110,23 +111,17 @@ public record RPY2POConverter(String language,
         }
       }
     }
-    return new Result(catalog, new DialogueFormats(formats), new Statements(statements), mismatchedFormats, missingNames);
+    return new Result(catalog, new Statements(plain, dialogue), mismatchedFormats, missingNames);
   }
 
   /**
    * The result of converting <code>.rpy</code> files into a <code>.po/.pot</code> file.
-   * @param catalog The representation of the <code>.po/.pot</code> file
-   * @param formats All dialogue formats found while reading the Ren'Py translation entries, unless
-   *                {@link #validateFormats()} is <code>null</code>, in which case, this will contain no formats.
-   * @param statements All plain statements found in the Ren'Py file that could not be parsed as dialogue (usually
-   *                   <code>nvl clear</code>)
+   * @param statements All statements found in the Ren'Py file
    * @param mismatchedFormats The IDs ({@link TranslationEntry#id()}) of all entries that did not match the format found
-   *                          in {@link #validateFormats()}. However, if {@link #validateFormats()} is
-   *                          <code>null</code>, this will be empty.
+   *                          in {@link #validateStatements()}. However, if <code>null</code>, this will be empty.
    * @param missingNames All Ren'Py character identifiers that could not be found in {@link #names()}
    */
   public record Result(Catalog catalog,
-                       DialogueFormats formats,
                        Statements statements,
                        List<String> mismatchedFormats,
                        List<String> missingNames) {

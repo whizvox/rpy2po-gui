@@ -14,7 +14,6 @@ import java.util.Map;
 
 public record PO2RPYConverter(String language,
                               Path input,
-                              DialogueFormats formats,
                               Statements statements) {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(PO2RPYConverter.class);
@@ -26,14 +25,14 @@ public record PO2RPYConverter(String language,
     catalog.forEach(msg -> {
       if (!msg.isObsolete()) {
         try {
-          TranslationEntry entry = formats.format(msg, language);
+          TranslationEntry entry = statements.format(msg, language);
           files.computeIfAbsent(entry.file(), k -> new TranslationFile()).add(entry);
         } catch (IllegalArgumentException e) {
           LOGGER.error("Found malformed message: {}", msg, e);
         }
       }
     });
-    statements.statements().values().forEach(stmt -> {
+    statements.plain().values().forEach(stmt -> {
       files.get(stmt.file()).add(new TranslationEntry(stmt.id(), language, stmt.statement(), stmt.statement(), stmt.file(), stmt.line()));
     });
     files.values().forEach(TranslationFile::sort);

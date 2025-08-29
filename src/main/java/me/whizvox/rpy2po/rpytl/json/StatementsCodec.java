@@ -16,26 +16,49 @@ public class StatementsCodec {
   public static final JsonSerializer<Statements> SERIALIZER = new JsonSerializer<>() {
     @Override
     public void serialize(Statements value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
-      Map<String, List<Statement>> map = new HashMap<>();
-      value.statements().forEach((id, entry) -> map.computeIfAbsent(entry.statement(), k -> new ArrayList<>()).add(entry));
-      List<String> statements = map.keySet().stream().sorted().toList();
-      gen.writeStartArray();
-      for (String stmt : statements) {
-        List<Statement> entries = map.get(stmt);
-        entries.sort((o1, o2) -> Comparator.comparing(Statement::file).thenComparing(Statement::line).compare(o1, o2));
-        gen.writeStartObject();
-        gen.writeStringField("statement", stmt);
-        gen.writeArrayFieldStart("entries");
-        for (Statement stmtObj : entries) {
-          gen.writeStartObject();
-          gen.writeStringField("location", stmtObj.file() + ":" + stmtObj.line());
-          gen.writeStringField("id", stmtObj.id());
-          gen.writeEndObject();
+      gen.writeStartObject();
+      {
+        gen.writeArrayFieldStart("plain");
+        {
+          Map<String, List<Statement>> plain = new HashMap<>();
+          value.plain().forEach((id, entry) -> plain.computeIfAbsent(entry.statement(), k -> new ArrayList<>()).add(entry));
+          List<String> statements = plain.keySet().stream().sorted().toList();
+          for (String stmt : statements) {
+            List<Statement> entries = plain.get(stmt);
+            entries.sort((o1, o2) -> Comparator.comparing(Statement::file).thenComparing(Statement::line).compare(o1, o2));
+            gen.writeStartObject();
+            gen.writeStringField("statement", stmt);
+            gen.writeArrayFieldStart("entries");
+            for (Statement stmtObj : entries) {
+              gen.writeStartObject();
+              gen.writeStringField("location", stmtObj.file() + ":" + stmtObj.line());
+              gen.writeStringField("id", stmtObj.id());
+              gen.writeEndObject();
+            }
+            gen.writeEndArray();
+            gen.writeEndObject();
+          }
         }
         gen.writeEndArray();
-        gen.writeEndObject();
+        gen.writeArrayFieldStart("dialogue");
+        {
+          Map<String, List<String>> export = new HashMap<>();
+          value.dialogue().forEach((id, format) -> export.computeIfAbsent(format, s -> new ArrayList<>()).add(id));
+          export.values().forEach(ids -> ids.sort(Comparator.naturalOrder()));
+          for (var entry : export.entrySet()) {
+            gen.writeStartObject();
+            gen.writeStringField("format", entry.getKey());
+            gen.writeArrayFieldStart("ids");
+            for (String id : entry.getValue()) {
+              gen.writeString(id);
+            }
+            gen.writeEndArray();
+            gen.writeEndObject();
+          }
+        }
+        gen.writeEndArray();
       }
-      gen.writeEndArray();
+      gen.writeEndObject();
     }
   };
 
@@ -43,9 +66,9 @@ public class StatementsCodec {
     @Override
     public Statements deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
       JsonNode n = p.getCodec().readTree(p);
-      ArrayNode statementsNode = (ArrayNode) n;
-      Map<String, Statement> statements = new HashMap<>();
-      for (JsonNode stmtNode : statementsNode) {
+      ArrayNode plainNode = (ArrayNode) n.get("plain");
+      Map<String, Statement> plain = new HashMap<>();
+      for (JsonNode stmtNode : plainNode) {
         String statement = stmtNode.get("statement").asText();
         ArrayNode entriesNode = (ArrayNode) stmtNode.get("entries");
         for (JsonNode entryNode : entriesNode) {
@@ -53,10 +76,19 @@ public class StatementsCodec {
           String id = entryNode.get("id").asText();
           SourceReference ref = SourceReference.parse(location);
           Statement stmtObj = new Statement(id, statement, ref.file(), ref.line());
-          statements.put(stmtObj.id(), stmtObj);
+          plain.put(stmtObj.id(), stmtObj);
         }
       }
-      return new Statements(statements);
+      ArrayNode dialogueNode = (ArrayNode) n.get("dialogue");
+      Map<String, String> dialogue = new HashMap<>();
+      for (JsonNode stmtNode : dialogueNode) {
+        String format = stmtNode.get("format").asText();
+        ArrayNode idsNode = (ArrayNode) stmtNode.get("ids");
+        for (JsonNode idNode : idsNode) {
+          dialogue.put(idNode.asText(), format);
+        }
+      }
+      return new Statements(plain, dialogue);
     }
   };
 
