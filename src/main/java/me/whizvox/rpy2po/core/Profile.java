@@ -135,7 +135,7 @@ public class Profile {
     return baseDirectory.resolve("stage");
   }
 
-  public Path getStagingDirectory(String lang) {
+  public Path getStagedLanguageDirectory(String lang) {
     return getStagingDirectory().resolve(lang);
   }
 

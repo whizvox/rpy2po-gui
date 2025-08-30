@@ -159,7 +159,7 @@ public class ResolveTranslationProblems extends JFrame {
 
     setContentPane(contentPane);
 
-    Path tplPath = profile.getBaseDirectory().resolve(profile.getPrimaryLanguage() + ".pot");
+    Path tplPath = profile.getTemplateFile();
     try {
       template = new PoParser().parseCatalog(tplPath.toFile());
     } catch (IOException e) {
@@ -201,7 +201,7 @@ public class ResolveTranslationProblems extends JFrame {
 
   private void initialize() {
     try {
-      Path langPath = profile.getBaseDirectory().resolve(languages.get(languageIndex) + ".po");
+      Path langPath = profile.getLanguageFile(languages.get(languageIndex));
       translations = new PoParser().parseCatalog(langPath.toFile());
       problemStrings.clear();
       tplFiles.clear();
@@ -512,12 +512,12 @@ public class ResolveTranslationProblems extends JFrame {
       MessageKey key = new MessageKey(msg);
       resolutions.put(key, new ProblemResolution(key, null, true));
     });
-    String file = languages.get(languageIndex) + ".po";
-    String[] options = {"Cancel", "Yes, Write to New File", "Yes, Overwrite " + file};
+    String file = languages.get(languageIndex);
+    String[] options = {"Cancel", "Yes, Write to New File", "Yes, Overwrite " + file + ".po"};
     int answer = JOptionPane.showOptionDialog(this, "Are you sure you want to apply these updates?", "Question", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
     if (answer != 0) {
       if (answer == 1) {
-        file = languages.get(languageIndex) + "-" + StringUtil.randomChars(6) + ".po";
+        file = languages.get(languageIndex) + "-" + StringUtil.randomChars(6);
       }
       List<Message> resultMessages = new ArrayList<>();
       template.forEach(msg -> {
@@ -562,7 +562,7 @@ public class ResolveTranslationProblems extends JFrame {
           resultMessages.add(newMsg);
         }
       });
-      Path path = profile.getBaseDirectory().resolve(file);
+      Path path = profile.getLanguageFile(file + ".po");
       try {
         Catalog result = new Catalog();
         // add header from translation file

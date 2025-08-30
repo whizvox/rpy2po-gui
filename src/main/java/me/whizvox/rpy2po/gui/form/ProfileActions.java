@@ -82,7 +82,7 @@ public class ProfileActions extends JFrame {
     buttonGenTranslations.setEnabled(enable);
     buttonExport.setEnabled(enable);
     buttonUpdate.setEnabled(enable);
-    buttonVerify.setEnabled(enable);
+    //buttonVerify.setEnabled(enable);
     if (includeSettings) {
       buttonNames.setEnabled(enable);
       buttonFiles.setEnabled(enable);
@@ -150,10 +150,10 @@ public class ProfileActions extends JFrame {
       if (!result.mismatchedFormats().isEmpty()) {
         LOGGER.info("Found {} mismatched formats: {}", result.mismatchedFormats().size(), result.mismatchedFormats());
       }
-      Path statementsPath = profile.getBaseDirectory().resolve("statements.json");
+      Path statementsPath = profile.getStatementsFile();
       LOGGER.info("Saving statements file {}", statementsPath);
       RPY2PO.inst().writeJson(statementsPath, result.statements());
-      Path tempFile = profile.getBaseDirectory().resolve(profile.getPrimaryLanguage() + ".pot");
+      Path tempFile = profile.getTemplateFile();
       PoWriter poWriter = new PoWriter();
       try (OutputStream out = Files.newOutputStream(tempFile)) {
         LOGGER.info("Writing catalog file {}", tempFile);
@@ -169,7 +169,7 @@ public class ProfileActions extends JFrame {
   }
 
   private void generateCatalogs() {
-    Path potPath = profile.getBaseDirectory().resolve(profile.getPrimaryLanguage() + ".pot");
+    Path potPath = profile.getTemplateFile();
     if (!Files.exists(potPath)) {
       int answer = JOptionPane.showConfirmDialog(this, "A template file must be generated first. Would you like to do that now?");
       if (answer == JOptionPane.YES_OPTION) {
@@ -179,7 +179,7 @@ public class ProfileActions extends JFrame {
     }
     List<Path> missing = new ArrayList<>();
     profile.getOutputLanguages().forEach(lang -> {
-      Path path = profile.getBaseDirectory().resolve(lang + ".po");
+      Path path = profile.getLanguageFile(lang);
       if (!Files.exists(path)) {
         missing.add(path);
       }
@@ -215,7 +215,7 @@ public class ProfileActions extends JFrame {
     } else if (answer == JOptionPane.CANCEL_OPTION) {
       return;
     }
-    Path templatePath = profile.getBaseDirectory().resolve(profile.getPrimaryLanguage() + ".pot");
+    Path templatePath = profile.getTemplateFile();
     if (!Files.exists(templatePath)) {
       JOptionPane.showMessageDialog(this, "Missing template file.");
       return;
@@ -244,7 +244,7 @@ public class ProfileActions extends JFrame {
       return;
     }
     Statements statements;
-    Path stmtsPath = profile.getBaseDirectory().resolve("statements.json");
+    Path stmtsPath = profile.getStatementsFile();
     try {
       statements = RPY2PO.inst().getMapper().readValue(stmtsPath.toFile(), Statements.class);
     } catch (IOException e) {
@@ -253,16 +253,16 @@ public class ProfileActions extends JFrame {
       return;
     }
     langs.forEach(lang -> {
-      Path poPath = profile.getBaseDirectory().resolve(lang + ".po");
+      Path poPath = profile.getLanguageFile(lang);
       if (!Files.exists(poPath)) {
         JOptionPane.showMessageDialog(this, "Could not find file " + poPath.getFileName() + "!", "Warning", JOptionPane.WARNING_MESSAGE);
         return;
       }
       Path tlDir;
       if (stage) {
-        tlDir = profile.getBaseDirectory().resolve("stage/" + lang).normalize();
+        tlDir = profile.getStagedLanguageDirectory(lang);
       } else {
-        tlDir = profile.getRenPyProjectDirectory().resolve("game/tl/" + lang).normalize();
+        tlDir = profile.getTranslationDirectory(lang);
       }
       if (Files.exists(tlDir)) {
         int answer;
