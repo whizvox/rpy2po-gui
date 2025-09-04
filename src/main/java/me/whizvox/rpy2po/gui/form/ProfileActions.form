@@ -92,7 +92,7 @@
               </grid>
             </constraints>
             <properties>
-              <enabled value="false"/>
+              <enabled value="true"/>
               <text value="Import Ren'Py Translations"/>
             </properties>
           </component>

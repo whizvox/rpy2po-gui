@@ -3,6 +3,7 @@ package me.whizvox.rpy2po.gui.form;
 import com.intellij.uiDesigner.core.GridConstraints;
 import com.intellij.uiDesigner.core.GridLayoutManager;
 import com.intellij.uiDesigner.core.Spacer;
+import com.soberlemur.potentilla.Catalog;
 import com.soberlemur.potentilla.PoWriter;
 import me.whizvox.rpy2po.core.FileUtils;
 import me.whizvox.rpy2po.core.Profile;
@@ -16,6 +17,7 @@ import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -212,7 +214,27 @@ public class ProfileActions extends JFrame {
   }
 
   private void importFiles() {
-    JOptionPane.showMessageDialog(this, "Work in progress!");
+    List<String> langs = SelectLanguagesDialog.prompt(this, profile, "Which languages do you want to import?", "Import");
+    for (String lang : langs) {
+      Path path = profile.getLanguageFile(lang);
+      try {
+        if (Files.exists(path)) {
+          int answer = GuiUtils.askYesNoOption(this, "Do you want to overwrite " + path.getFileName() + "?");
+          if (answer == JOptionPane.YES_OPTION) {
+            Files.deleteIfExists(path);
+          }
+        }
+        RPY2POConverter converter = new RPY2POConverter(lang, profile.getTranslationFiles(lang), profile.getNames(), null, CommentGenerator.SPEAKING);
+        var result = converter.convert();
+        Catalog catalog = result.catalog();
+        Files.createDirectories(path.getParent());
+        new PoWriter().write(catalog, path.toFile());
+        JOptionPane.showMessageDialog(this, "Successfully created " + path.getFileName());
+      } catch (IOException e) {
+        LOGGER.error("Could not convert {}", lang, e);
+        GuiUtils.showErrorMessage(this, "Could not convert " + lang, e);
+      }
+    }
   }
 
   private void updateFiles() {
@@ -351,7 +373,7 @@ public class ProfileActions extends JFrame {
     buttonExport.setText("Export Ren'Py Translations");
     panel1.add(buttonExport, new GridConstraints(7, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
     buttonImport = new JButton();
-    buttonImport.setEnabled(false);
+    buttonImport.setEnabled(true);
     buttonImport.setText("Import Ren'Py Translations");
     panel1.add(buttonImport, new GridConstraints(4, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(-1, 40), null, 0, false));
     final JPanel panel2 = new JPanel();
