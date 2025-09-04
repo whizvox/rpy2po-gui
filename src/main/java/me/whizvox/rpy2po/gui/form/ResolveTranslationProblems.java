@@ -562,7 +562,7 @@ public class ResolveTranslationProblems extends JFrame {
           resultMessages.add(newMsg);
         }
       });
-      Path path = profile.getLanguageFile(file + ".po");
+      Path path = profile.getLanguageFile(file);
       try {
         Catalog result = new Catalog();
         // add header from translation file
@@ -571,7 +571,7 @@ public class ResolveTranslationProblems extends JFrame {
         }
         resultMessages.forEach(result::add);
         new PoWriter().write(result, path.toFile());
-        JOptionPane.showMessageDialog(this, "Successfully updated " + file + "!");
+        JOptionPane.showMessageDialog(this, "Successfully updated " + path.getFileName());
       } catch (IOException e) {
         LOGGER.error("Could not write file: {}", path.getFileName(), e);
         GuiUtils.showErrorMessage(this, "Could not write file", e);
