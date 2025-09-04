@@ -158,7 +158,7 @@ public class TranslationFile implements Iterable<TranslationEntry> {
         }
         Matcher m;
         if ((m = PATTERN_GENERIC_OCCURRENCE.matcher(line)).find()) {
-          if (file != null) {
+          if (file != null && orig != null) {
             entries.add(new TranslationEntry(id, lang, orig, translated, file, srcLine));
             orig = null;
             translated = null;
