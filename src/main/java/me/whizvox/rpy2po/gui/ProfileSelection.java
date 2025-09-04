@@ -71,10 +71,8 @@ public class ProfileSelection extends JComponent {
           .filter(profile -> profile.getName().toLowerCase().contains(filter.toLowerCase()));
     }
     newProfilesStream
-        .sorted(Comparator.comparing(Profile::getName))
-        .forEach(profile -> {
-          profiles.add(new ProfileListing(profile.getName(), profile.getBaseDirectory().toString()));
-        });
+        .sorted((o1, o2) -> o2.getLastOpened().compareTo(o1.getLastOpened()))
+        .forEach(profile -> profiles.add(new ProfileListing(profile.getName(), profile.getBaseDirectory().toString())));
     if (!profiles.isEmpty()) {
       var hGroup = layout.createParallelGroup();
       var vGroup = layout.createSequentialGroup();
